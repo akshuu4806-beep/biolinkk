@@ -449,8 +449,8 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 4. Final text jisme Bot Name bhi shamil hai
     status_text = (
-        f"<b>📊 {bot_name}\n\n"
-        "SYSTEM STATS</b>\n" 
+        f"{bot_name}\n\n"
+        "<b> 📊SYSTEM STATS</b>\n" 
         "----------------------------\n"
         f"<b>⏱ Uptime:</b> <code>{uptime_str}</code>\n"
         f"<b>🔍 Total Scanned:</b> <code>{total_scanned}</code>\n"
