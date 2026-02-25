@@ -20,7 +20,7 @@ from keep_alive import keep_alive
 
 # ========== CONFIGURATION ==========
 TOKEN = os.environ.get('BOT_TOKEN')
-ADMIN_IDS = [8531690745] 
+ADMIN_IDS = [8507307665] 
 IST = pytz.timezone('Asia/Kolkata')
 
 # ========== SQLITE DATABASE SETUP ==========
