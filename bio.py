@@ -13,7 +13,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     ChatMemberHandler, # <--- ADD THIS
     filters,
-    ContextTypes
+    ContextTypes,
     TypeHandler,          # <--- ADD THIS
     ApplicationHandlerStop # <--- ADD THIS
 )
