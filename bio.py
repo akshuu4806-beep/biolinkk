@@ -196,12 +196,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         return
 
-    # 🔒 GLOBAL ADMIN CHECK (Sirf non-delete buttons ke liye)
-    if not await is_user_admin(update, context):
-        await query.answer("❌ you are not administrator", show_alert=True)
-        return
+    # 🔓 ALLOW EVERYONE TO USE HELP BUTTONS (Bypassing admin check)
+    if query.data not in ["help_combined", "dm_back"]:
+        # 🔒 GLOBAL ADMIN CHECK FOR OTHER BUTTONS
+        if not await is_user_admin(update, context):
+            await query.answer("❌ you are not administrator", show_alert=True)
+            return
 
-    await query.answer()
     # ... baki ka code ...
 
     # Shared Help List
@@ -231,8 +232,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Hi {query.from_user.first_name}, please click the button below to see the help menu in your DMs!",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
-            # Group me clean rakhne ke liye 15 seconds baad ye message auto-delete ho jayega
-            asyncio.create_task(delete_after_delay(msg, 15))
             
             # Loading circle hatane ke liye
             await query.answer() 
@@ -465,32 +464,28 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("🗑 Delete", callback_data="del_msg")]]
     user_id = update.effective_user.id
     
-    try:
-        # Try to send the help menu directly to the user's DM
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=help_text, 
-            reply_markup=InlineKeyboardMarkup(keyboard), 
-            parse_mode='HTML'
-        )
-        
-        # If triggered in a group, send a quick confirmation and auto-delete it
-        if update.effective_chat.type != 'private':
-            msg = await update.message.reply_text("✅ I have sent the help menu to your DMs!")
-            asyncio.create_task(delete_after_delay(msg, 5))
-            
-    except Exception:
-        # If the bot fails to DM (because the user hasn't started the bot in private yet)
+    # If triggered in a group, drop a DM button instead of sending directly to DM
+    if update.effective_chat.type != 'private':
         bot_user = await context.bot.get_me()
-        fail_keyboard = [[InlineKeyboardButton("🤖 Click here to start me", url=f"https://t.me/{bot_user.username}?start=true")]]
+        dm_url = f"https://t.me/{bot_user.username}?start=help"
         
-        msg = await update.message.reply_text(
-            f"❌ I cannot send you a DM, {update.effective_user.first_name}.\n"
-            "Please start me in private first by clicking the button below!",
-            reply_markup=InlineKeyboardMarkup(fail_keyboard)
+        group_keyboard = [[InlineKeyboardButton("📥 Get Help in DM", url=dm_url)]]
+        
+        await update.message.reply_text(
+            f"Hi {update.effective_user.first_name}, please click the button below to get the help menu in your DMs!",
+            reply_markup=InlineKeyboardMarkup(group_keyboard)
         )
-        # Delete this warning after 15 seconds to keep the group clean
-        asyncio.create_task(delete_after_delay(msg, 15))
+    # If triggered in DM directly, just send the text
+    else:
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=help_text, 
+                reply_markup=InlineKeyboardMarkup(keyboard), 
+                parse_mode='HTML'
+            )
+        except Exception:
+            pass
         
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 1. Get current bot info
