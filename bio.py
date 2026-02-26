@@ -14,6 +14,8 @@ from telegram.ext import (
     ChatMemberHandler, # <--- ADD THIS
     filters,
     ContextTypes
+    TypeHandler,          # <--- ADD THIS
+    ApplicationHandlerStop # <--- ADD THIS
 )
 import os
 from keep_alive import keep_alive
@@ -166,6 +168,21 @@ async def delete_after_delay(message, delay=30):
     except:
         pass
 
+async def global_bot_admin_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # DMs are fine, skip the check so users can still message the bot privately
+    if not update.effective_chat or update.effective_chat.type == 'private':
+        return
+    
+    try:
+        # Check the bot's status in the current group
+        bot_member = await context.bot.get_chat_member(update.effective_chat.id, context.bot.id)
+        if bot_member.status not in ['administrator', 'creator']:
+            # Bot is not admin -> stop ALL further processing immediately
+            raise ApplicationHandlerStop
+    except Exception:
+        # If there's an error (e.g., bot doesn't have access), stay completely silent
+        raise ApplicationHandlerStop
+        
 # ========== CALLBACK HANDLER ==========
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -201,9 +218,31 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     if query.data == "help_combined":
-        keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data="dm_back")]]
-        await query.edit_message_text(help_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
-        return
+        # Agar button group me click hua hai
+        if query.message.chat.type != 'private':
+            bot_user = await context.bot.get_me()
+            # Bot ke DM me le jaane wala link (sath me 'help' parameter)
+            dm_url = f"https://t.me/{bot_user.username}?start=help"
+            
+            keyboard = [[InlineKeyboardButton("📥 Get Help in DM", url=dm_url)]]
+            
+            # Group me reply bhejna
+            msg = await query.message.reply_text(
+                f"Hi {query.from_user.first_name}, please click the button below to see the help menu in your DMs!",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            # Group me clean rakhne ke liye 15 seconds baad ye message auto-delete ho jayega
+            asyncio.create_task(delete_after_delay(msg, 15))
+            
+            # Loading circle hatane ke liye
+            await query.answer() 
+            return
+        
+        # Agar button already DM me click hua hai, toh wahi Help menu dikha do
+        else:
+            keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data="dm_back")]]
+            await query.edit_message_text(help_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+            return
 
     if query.data == "dm_back":
         # Fetch the bot user info so it's defined in this scope
@@ -351,7 +390,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         # --- MESSAGE 1 & 2 (Warnings below limit) ---
         else:
-            text = f"⚠️ <b>MESSAGE REMOVED</b>\n👤 <b>User:</b> {safe_name}\n🆔 <b>ID:</b> <code>{user.id}</code>\n📝 <b>Reason:</b> {reason} 📊 <b>Warnings:</b> {count}/{warn_limit}\n\n🛑 NOTICE: PLEASE REMOVE ANY LINKS FROM YOUR BIO IMMEDIATELY.\n\n📌 REPEATED VIOLATIONS MAY LEAD TO MUTE/BAN."
+            text = f"⚠️ <b>MESSAGE REMOVED</b>\n👤 <b>User:</b> {safe_name}\n🆔 <b>ID:</b> <code>{user.id}</code>\n📝 <b>Reason:</b> {reason}\n 📊 <b>Warnings:</b> {count}/{warn_limit}\n\n🛑 NOTICE: PLEASE REMOVE ANY LINKS FROM YOUR BIO IMMEDIATELY.\n\n📌 REPEATED VIOLATIONS MAY LEAD TO MUTE/BAN."
             btn_text, btn_data = ("❌ Unapprove", f"unapprove_{user.id}") if is_approved else ("✅ Approve", f"approve_{user.id}")
             keyboard = [[InlineKeyboardButton(btn_text, callback_data=btn_data), InlineKeyboardButton("🛡 Unwarn", callback_data=f"unwarn_{user.id}")], [InlineKeyboardButton("🗑 Delete", callback_data=f"del_{user.id}")]]
             
@@ -374,6 +413,13 @@ async def chat_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ========== COMMANDS ==========
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    # 1. Agar group ke link se aaya (Deep Linking Check)
+    if context.args and context.args[0] == 'help':
+        await help_command(update, context)
+        return  # Yahan se code wapas laut jayega, aage nahi badhega
+    # ------------------------------
+   
     bot_user = await context.bot.get_me()
     
     if update.effective_chat.type == 'private':
@@ -416,42 +462,66 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• <code>/settings &lt;warn&gt; &lt;hours&gt;</code> : Configure limits\n"
     )
     
-    # "Delete" button jo sabke liye kaam karega
     keyboard = [[InlineKeyboardButton("🗑 Delete", callback_data="del_msg")]]
+    user_id = update.effective_user.id
     
-    # Yahan humne auto-delete task hata diya hai
-    await update.message.reply_text(
-        help_text, 
-        reply_markup=InlineKeyboardMarkup(keyboard), 
-        parse_mode='HTML'
-    )
-
+    try:
+        # Try to send the help menu directly to the user's DM
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=help_text, 
+            reply_markup=InlineKeyboardMarkup(keyboard), 
+            parse_mode='HTML'
+        )
+        
+        # If triggered in a group, send a quick confirmation and auto-delete it
+        if update.effective_chat.type != 'private':
+            msg = await update.message.reply_text("✅ I have sent the help menu to your DMs!")
+            asyncio.create_task(delete_after_delay(msg, 5))
+            
+    except Exception:
+        # If the bot fails to DM (because the user hasn't started the bot in private yet)
+        bot_user = await context.bot.get_me()
+        fail_keyboard = [[InlineKeyboardButton("🤖 Click here to start me", url=f"https://t.me/{bot_user.username}?start=true")]]
+        
+        msg = await update.message.reply_text(
+            f"❌ I cannot send you a DM, {update.effective_user.first_name}.\n"
+            "Please start me in private first by clicking the button below!",
+            reply_markup=InlineKeyboardMarkup(fail_keyboard)
+        )
+        # Delete this warning after 15 seconds to keep the group clean
+        asyncio.create_task(delete_after_delay(msg, 15))
+        
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # 1. Bot ka current info nikalne ke liye (Naam ke liye)
+    # 1. Get current bot info
     bot_user = await context.bot.get_me()
     bot_name = html.escape(bot_user.first_name)
 
-    # 2. Uptime calculation
+    # 2. Uptime calculation (Hours, Minutes, Seconds only)
     bot_start_time = db.get_start_time()
     now = datetime.now(IST)
     uptime_delta = now - bot_start_time
     
-    days = uptime_delta.days
-    hours, remainder = divmod(uptime_delta.seconds, 3600)
-    minutes, _ = divmod(remainder, 60)
-    uptime_str = f"{days}d {hours}h {minutes}m"
+    # Calculate total seconds to ensure days are converted into hours
+    total_seconds = int(uptime_delta.total_seconds())
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    
+    # Format: 25h 15m 30s
+    uptime_str = f"{hours}h {minutes}m {seconds}s"
 
-    # 3. Database se stats lena
+    # 3. Get database stats
     total_scanned, bio_caught = db.get_system_counters()
     approved_count, total_warnings = db.get_stats()
     all_groups = db.get_groups()
     active_groups_count = len(all_groups)
 
-    # 4. Final text jisme Bot Name bhi shamil hai
+    # 4. Final text
     status_text = (
         f"{bot_name}\n\n"
         "<b> 📊SYSTEM STATS</b>\n" 
         "----------------------------\n"
+        "-------------\n"
         f"<b>⏱ Uptime:</b> <code>{uptime_str}</code>\n"
         f"<b>🔍 Total Scanned:</b> <code>{total_scanned}</code>\n"
         f"<b>🧬 Bio Links Caught:</b> <code>{bio_caught}</code>\n"
@@ -629,6 +699,9 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     app = Application.builder().token(TOKEN).build()
+
+    # --- ADD THIS LINE RIGHT HERE ---
+    app.add_handler(TypeHandler(Update, global_bot_admin_check), group=-1)
     
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
