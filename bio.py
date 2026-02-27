@@ -436,6 +436,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     keyboard = [[InlineKeyboardButton("🔊 Unmute", callback_data=f"unmute_{user.id}")], [InlineKeyboardButton("🗑 Delete", callback_data=f"del_{user.id}")]]
                     await context.bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
 
+            
             elif action == "ban":
                 try:
                     await context.bot.ban_chat_member(chat_id=chat_id, user_id=user.id)
@@ -450,6 +451,15 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     text = f"🚫 <b>User has been BANNED</b>\n👤 <b>Name:</b> {safe_name}\n🆔 <b>ID:</b> <code>{user.id}</code>\n📝 <b>Reason:</b> {reason}"
                     keyboard = [[InlineKeyboardButton("🗑 Delete", callback_data=f"del_{user.id}")]]
                     await context.bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+                    
+        # 👇👇👇 YAHAN SE WARNING WALA CODE ADD KAREIN 👇👇👇
+        else:
+            text = f"⚠️ <b>MESSAGE REMOVED</b>\n👤 <b>User:</b> {safe_name}\n🆔 <b>ID:</b> <code>{user.id}</code>\n📝 <b>Reason:</b> {reason}\n📊 <b>Warnings:</b> {count}/{warn_limit}\n\n🛑 NOTICE: PLEASE REMOVE ANY LINKS FROM YOUR BIO IMMEDIATELY.\n\n📌 REPEATED VIOLATIONS WILL LEAD TO MUTE/BAN."
+            btn_text, btn_data = ("❌ Unallow", f"unallow_{user.id}") if is_allowd else ("✅ allow", f"allow_{user.id}")
+            keyboard = [[InlineKeyboardButton(btn_text, callback_data=btn_data), InlineKeyboardButton("🛡 Unwarn", callback_data=f"unwarn_{user.id}")], [InlineKeyboardButton("🗑 Delete", callback_data=f"del_{user.id}")]]
+            
+            await context.bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+        # 👆👆👆 YAHAN TAK 👆👆👆
                     
 # ========== CHAT MEMBER HANDLER (Detects Manual Unmutes) ==========
 async def chat_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
