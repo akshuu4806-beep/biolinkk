@@ -43,7 +43,7 @@ class PersistentDB:
             self.db["system_info"].insert_one({"type": "stats", "scanned": 0, "caught": 0})
 
         # Collections (equivalent to Tables)
-        self.group_settings = self.db["group_settings"]
+        self.group_config = self.db["group_config"]
         self.allowlist = self.db["allowlist"]
         self.warnings = self.db["warnings"]
         self.users = self.db["users"]
@@ -63,12 +63,12 @@ class PersistentDB:
         groups = [g["chat_id"] for g in self.groups.find()]
         return list(set(users + groups))
 
-    def get_settings(self, chat_id):
-        row = self.group_settings.find_one({"chat_id": chat_id})
+    def get_config(self, chat_id):
+        row = self.group_config.find_one({"chat_id": chat_id})
         return (row["warn_limit"], row["mute_hours"]) if row else (5, 1)
 
     def set_limits(self, chat_id, warn_limit, mute_hours):
-        self.group_settings.update_one(
+        self.group_config.update_one(
             {"chat_id": chat_id}, 
             {"$set": {"warn_limit": warn_limit, "mute_hours": mute_hours}}, 
             upsert=True
@@ -213,9 +213,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• <code>/help</code> : Show this menu\n"
         "• <code>/status</code> : Group statistics\n\n"
         "🛠 <b>Admin Commands:</b>\n"
-        "• <code>/approve</code> | <code>/unapprove</code> : Whitelist management\n"
+        "• <code>/allow</code> | <code>/unallow</code> : Whitelist management\n"
         "• <code>/aplist</code> : View whitelisted users\n"
-        "• <code>/settings &lt;warn&gt; &lt;hours&gt;</code> : Configure limits\n"
+        "• <code>/config &lt;warn&gt; &lt;hours&gt;</code> : Configure limits\n"
     )
 
     if query.data == "help_combined":
@@ -249,14 +249,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         start_text = (
             f"    <b>Welcome to {html.escape(bot_user.first_name)}!</b>\n\n"
-            "I am an advanced security bot designed to manage group security.\n\n"
-            "  •  <b>Auto-Link Delete</b>: Instantly removes links from messages.\n"
-            "  •  <b>Bio Scanner</b>: Blocks users who have links in their Telegram Bio.\n"
-            "  •  <b>Self-Cleaning</b>: Bot replies auto-delete after 30 seconds.\n"
-            "  •  <b>Dynamic Buttons</b>: Approve/Unapprove buttons switch instantly on click.\n"
-            "  •  <b>Auto-Punish</b>: Automatically mutes users after a specific warning limit.\n"
-            "  •  <b>Database Memory</b>: Saves all settings and whitelists permanently.\n"
-            "  •  <b>Custom Limits</b>: Set your own warning counts and mute hours.\n\n"
+            "I help to protect your groups from users with links in their Bio.\n\n"
+            "  •  Instantly removes links from messages.\n"
+            "  •  Automatic URL detection in user Bios.\n"
+            "  •  Customizable warning limit.\n"
+            "  •  Auto-mute or ban when limit is reached.\n"
+            "  •  Whitelist management for trusted users.\n\n"
             "💡 <b>Make the bot an Admin in the group with 'Delete Messages' & 'Ban Users' permissions!</b>\n"
         )
         
@@ -278,15 +276,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = query.data.split("_")
         action, target_id = parts[0], int(parts[1])
 
-        if action == "approve":
+        if action == "allow":
             db.add_to_allowlist(target_id)
             db.reset_warnings(target_id)
-            keyboard = [[InlineKeyboardButton("❌ Unapprove", callback_data=f"unapprove_{target_id}"), InlineKeyboardButton("🛡 Unwarn", callback_data=f"unwarn_{target_id}")], [InlineKeyboardButton("🗑 Delete", callback_data=f"del_{target_id}")]]
-            await query.edit_message_text(f"✅ User `{target_id}` has been Approved.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-        elif action == "unapprove":
+            keyboard = [[InlineKeyboardButton("❌ Unallow", callback_data=f"unallow_{target_id}"), InlineKeyboardButton("🛡 Unwarn", callback_data=f"unwarn_{target_id}")], [InlineKeyboardButton("🗑 Delete", callback_data=f"del_{target_id}")]]
+            await query.edit_message_text(f"✅ User `{target_id}` has been allowd.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        elif action == "unallow":
             db.remove_from_allowlist(target_id)
-            keyboard = [[InlineKeyboardButton("✅ Approve", callback_data=f"approve_{target_id}"), InlineKeyboardButton("🛡 Unwarn", callback_data=f"unwarn_{target_id}")], [InlineKeyboardButton("🗑 Delete", callback_data=f"del_{target_id}")]]
-            await query.edit_message_text(f"❌ User `{target_id}` Unapproved.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            keyboard = [[InlineKeyboardButton("✅ allow", callback_data=f"allow_{target_id}"), InlineKeyboardButton("🛡 Unwarn", callback_data=f"unwarn_{target_id}")], [InlineKeyboardButton("🗑 Delete", callback_data=f"del_{target_id}")]]
+            await query.edit_message_text(f"❌ User `{target_id}` Unallowd.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
         elif action == "unwarn":
             new_count = db.remove_warning(target_id)
             await query.edit_message_text(f"🛡 Warning removed. Current: {new_count}")
@@ -325,15 +323,15 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         return # Cannot fetch bot status, stay silent just in case
 
-    # 2. Check if the user is an Admin, Bot Owner, or Whitelisted (Approved)
+    # 2. Check if the user is an Admin, Bot Owner, or Whitelisted (Allowed)
     is_group_admin = await is_user_admin(update, context)
-    is_approved = db.is_allowed(user.id)
+    is_allowd = db.is_allowed(user.id)
     
-    if is_group_admin or is_approved:
-        return  # Do nothing. Admins and approved users are completely safe from warnings.
+    if is_group_admin or is_allowd:
+        return  # Do nothing. Admins and allowd users are completely safe from warnings.
 
     # 3. Proceed with scanning for regular users
-    warn_limit, mute_hrs = db.get_settings(chat_id)
+    warn_limit, mute_hrs = db.get_config(chat_id)
     msg_text = update.message.text or update.message.caption
     
     violation, reason = False, ""
@@ -390,7 +388,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # --- MESSAGE 1 & 2 (Warnings below limit) ---
         else:
             text = f"⚠️ <b>MESSAGE REMOVED</b>\n👤 <b>User:</b> {safe_name}\n🆔 <b>ID:</b> <code>{user.id}</code>\n📝 <b>Reason:</b> {reason}\n 📊 <b>Warnings:</b> {count}/{warn_limit}\n\n🛑 NOTICE: PLEASE REMOVE ANY LINKS FROM YOUR BIO IMMEDIATELY.\n\n📌 REPEATED VIOLATIONS MAY LEAD TO MUTE/BAN."
-            btn_text, btn_data = ("❌ Unapprove", f"unapprove_{user.id}") if is_approved else ("✅ Approve", f"approve_{user.id}")
+            btn_text, btn_data = ("❌ Unallow", f"unallow_{user.id}") if is_allowd else ("✅ allow", f"allow_{user.id}")
             keyboard = [[InlineKeyboardButton(btn_text, callback_data=btn_data), InlineKeyboardButton("🛡 Unwarn", callback_data=f"unwarn_{user.id}")], [InlineKeyboardButton("🗑 Delete", callback_data=f"del_{user.id}")]]
             
             await context.bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
@@ -429,13 +427,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_text = (
         f"    <b>Welcome to {html.escape(bot_user.first_name)}!</b>\n\n"
         "I am an advanced security bot designed to manage group security.\n\n"
-        "  •  <b>Auto-Link Delete</b>: Instantly removes links from messages.\n"
-        "  •  <b>Bio Scanner</b>: Blocks users who have links in their Telegram Bio.\n"
-        "  •  <b>Self-Cleaning</b>: Bot replies auto-delete after 30 seconds.\n"
-        "  •  <b>Dynamic Buttons</b>: Approve/Unapprove buttons switch instantly on click.\n"
-        "  •  <b>Auto-Punish</b>: Automatically mutes users after a specific warning limit.\n"
-        "  •  <b>Database Memory</b>: Saves all settings and whitelists permanently.\n"
-        "  •  <b>Custom Limits</b>: Set your own warning counts and mute hours.\n\n"
+        "  •   Instantly removes links from messages.\n"
+        "  •   Automatic URL detection in users Bio.\n"
+        "  •   Customizable warning limit.\n"
+        "  •   Auto-mute or ban when limit is reached.\n"
+        "  •   Whitelist management for trusted users.\n\n"
         "💡 <b>Make the bot an Admin in the group with 'Delete Messages' & 'Ban Users' permissions!</b>\n"
     )
     
@@ -456,9 +452,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• <code>/help</code> : Show this menu\n"
         "• <code>/status</code> : Group statistics\n\n"
         "🛠 <b>Admin Commands:</b>\n"
-        "• <code>/approve</code> | <code>/unapprove</code> : Whitelist management\n"
+        "• <code>/allow</code> | <code>/unallow</code> : Whitelist management\n"
         "• <code>/aplist</code> : View whitelisted users\n"
-        "• <code>/settings &lt;warn&gt; &lt;hours&gt;</code> : Configure limits\n"
+        "• <code>/config &lt;warn&gt; &lt;hours&gt;</code> : Configure limits\n"
     )
     
     keyboard = [[InlineKeyboardButton("🗑 Delete", callback_data="del_msg")]]
@@ -507,7 +503,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 3. Get database stats
     total_scanned, bio_caught = db.get_system_counters()
-    approved_count, total_warnings = db.get_stats()
+    allowd_count, total_warnings = db.get_stats()
     all_groups = db.get_groups()
     active_groups_count = len(all_groups)
 
@@ -521,7 +517,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<b>🔍 Total Scanned:</b> <code>{total_scanned}</code>\n"
         f"<b>🧬 Bio Links Caught:</b> <code>{bio_caught}</code>\n"
         f"<b>⚠️ Total Warnings:</b> <code>{total_warnings}</code>\n"
-        f"<b>✅ Approved Users:</b> <code>{approved_count}</code>\n"
+        f"<b>✅ allowd Users:</b> <code>{allowd_count}</code>\n"
         f"<b>📂 Monitored Groups:</b> <code>{active_groups_count}</code>\n"
     )
 
@@ -533,7 +529,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML'
     )
 
-async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not await is_user_admin(update, context):
         msg = await update.message.reply_text("❌ you are not administrator")
@@ -543,10 +539,10 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         limit, hours = int(context.args[0]), int(context.args[1])
         db.set_limits(update.effective_chat.id, limit, hours)
-        msg = await update.message.reply_text(f"✅ Settings Updated!\nLimit: {limit} warns\nMute: {hours} hours")
+        msg = await update.message.reply_text(f"✅ config Updated!\nLimit: {limit} warns\nMute: {hours} hours")
         asyncio.create_task(delete_after_delay(msg))
     except:
-        msg = await update.message.reply_text("❌ Usage: `/settings 5 1`")
+        msg = await update.message.reply_text("❌ Usage: `/config 5 1`")
         asyncio.create_task(delete_after_delay(msg))
 
 # Is block ko 'is_user_admin' ke niche paste karein
@@ -575,7 +571,7 @@ async def resolve_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
     return None
 
-async def approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def allow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_user_admin(update, context):
         msg = await update.message.reply_text("❌ you are not administrator")
         asyncio.create_task(delete_after_delay(msg, 10))
@@ -587,10 +583,10 @@ async def approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.reset_warnings(target_id)
         msg = await update.message.reply_text(f"✅ User `{target_id}` whitelisted.")
     else:
-        msg = await update.message.reply_text("❌ Usage: Reply to user or `/approve <ID>`")
+        msg = await update.message.reply_text("❌ Usage: Reply to user or `/allow <ID>`")
     asyncio.create_task(delete_after_delay(msg))
 
-async def unapprove_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def unallow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_user_admin(update, context):
         msg = await update.message.reply_text("❌ you are not administrator")
         asyncio.create_task(delete_after_delay(msg, 10))
@@ -611,7 +607,7 @@ async def aplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     users = db.get_allowlist()
-    msg_text = "✅ <b>Approved Users:</b>\n" + "\n".join([f"<code>{u}</code>" for u in users]) if users else "Empty."
+    msg_text = "✅ <b>allowd Users:</b>\n" + "\n".join([f"<code>{u}</code>" for u in users]) if users else "Empty."
     msg = await update.message.reply_text(msg_text, parse_mode='HTML')
     asyncio.create_task(delete_after_delay(msg))
 
@@ -701,9 +697,9 @@ def main():
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("status", status_command))
-    app.add_handler(CommandHandler("settings", settings_command))
-    app.add_handler(CommandHandler("approve", approve_command))
-    app.add_handler(CommandHandler("unapprove", unapprove_command))
+    app.add_handler(CommandHandler("config", config_command))
+    app.add_handler(CommandHandler("allow", allow_command))
+    app.add_handler(CommandHandler("unallow", unallow_command))
     app.add_handler(CommandHandler("aplist", aplist_command))
     app.add_handler(CommandHandler("grouplist", grouplist_command))
     app.add_handler(CommandHandler("getlink", getlink_command))
