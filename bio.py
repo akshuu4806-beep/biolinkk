@@ -220,9 +220,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # If they clicked "Warn", show numbers 3 to 10
         if query.data == "cfg_warn":
+            warn_limit, action = db.get_config(chat_id)
+            
+            # Helper function to add a tick to the currently active limit
+            def get_btn(num):
+                btn_text = f"✅ {num}" if num == warn_limit else str(num)
+                return InlineKeyboardButton(btn_text, callback_data=f"setwarn_{num}")
+                
             keyboard = [
-                [InlineKeyboardButton("3", callback_data="setwarn_3"), InlineKeyboardButton("4", callback_data="setwarn_4"), InlineKeyboardButton("5", callback_data="setwarn_5"), InlineKeyboardButton("6", callback_data="setwarn_6")],
-                [InlineKeyboardButton("7", callback_data="setwarn_7"), InlineKeyboardButton("8", callback_data="setwarn_8"), InlineKeyboardButton("9", callback_data="setwarn_9"), InlineKeyboardButton("10", callback_data="setwarn_10")],
+                [get_btn(3), get_btn(4), get_btn(5), get_btn(6)],
+                [get_btn(7), get_btn(8), get_btn(9), get_btn(10)],
                 [InlineKeyboardButton("⬅️ Back", callback_data="cfg_main")]
             ]
             await query.edit_message_text("⚠️ **Select Warning Limit:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -249,14 +256,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # The Main Config Menu (used for 'Back' or after a setting is changed)
         if query.data == "cfg_main":
             warn_limit, action = db.get_config(chat_id)
+            
+            # Add dynamic ticks based on the active action
+            mute_btn = "✅ 🔇 Mute" if action == "mute" else "🔇 Mute"
+            ban_btn = "✅ 🚫 Ban" if action == "ban" else "🚫 Ban"
+            
             text = f"⚙️ **Group Configuration**\n\n⚠️ **Current Warn Limit:** {warn_limit}\n🔨 **Current Action:** {action.upper()}"
             keyboard = [
-                [
-                    InlineKeyboardButton("⚠️ Warn", callback_data="cfg_warn"),
-                    InlineKeyboardButton("🔇 Mute", callback_data="cfg_mute"),
-                    InlineKeyboardButton("🚫 Ban", callback_data="cfg_ban"),
-                    InlineKeyboardButton("🗑 Delete", callback_data="del_msg")
-                ]
+                [InlineKeyboardButton(f"⚠️ Warn ({warn_limit})", callback_data="cfg_warn")],
+                [InlineKeyboardButton(mute_btn, callback_data="cfg_mute"), InlineKeyboardButton(ban_btn, callback_data="cfg_ban")],
+                [InlineKeyboardButton("🗑 Delete", callback_data="del_msg")]
             ]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
             return
@@ -346,6 +355,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif action == "unwarn":
             new_count = db.remove_warning(target_id)
             await query.edit_message_text(f"🛡 Warning removed. Current: {new_count}")
+        
+        elif action == "unban":
+            try:
+                # unban_chat_member removes the ban. only_if_banned=True prevents errors
+                await context.bot.unban_chat_member(query.message.chat_id, target_id, only_if_banned=True)
+                db.reset_warnings(target_id)
+                await query.edit_message_text(f"🔓 User `{target_id}` has been Unbanned. Warnings restarted!")
+            except Exception as e: 
+                await query.answer("❌ Failed to unban. Make sure I am an admin.", show_alert=True)
+                
         elif action == "unmute":
             try:
                 await context.bot.restrict_chat_member(
@@ -356,6 +375,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 db.reset_warnings(target_id) # <--- RESETS WARNINGS TO 0
                 await query.edit_message_text(f"🔊 User `{target_id}` Unmuted. Warnings restarted!")
             except: pass
+
+       
 
 # ========== MESSAGE HANDLER ==========
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -435,7 +456,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     err_text = f"⚠️ <b>Failed to mute {safe_name}!</b>\n❗ Ensure I have 'Ban Users' permission."
                     msg = await context.bot.send_message(chat_id, err_text, parse_mode='HTML')
-                    asyncio.create_task(delete_after_delay(msg, 10))
+                
                     db.remove_warning(user.id)
                     return 
             
@@ -446,7 +467,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     
                     # 2. Send the Ban message
                     text = f"🚫 <b>User has been BANNED</b>\n👤 <b>Name:</b> {safe_name}\n🆔 <b>ID:</b> <code>{user.id}</code>\n📝 <b>Reason:</b> {reason}"
-                    keyboard = [[InlineKeyboardButton("🗑 Delete", callback_data=f"del_{user.id}")]]
+                    keyboard = [[InlineKeyboardButton("🔓 Unban", callback_data=f"unban_{user.id}"), InlineKeyboardButton("🗑 Delete", callback_data=f"del_{user.id}")]]
                     await context.bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
                     
                     # 3. Reset warnings to 0 after banning
@@ -455,7 +476,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     err_text = f"⚠️ <b>Failed to ban {safe_name}!</b>\n❗ Ensure I have 'Ban Users' permission."
                     msg = await context.bot.send_message(chat_id, err_text, parse_mode='HTML')
-                    asyncio.create_task(delete_after_delay(msg, 10))
+                    
                     db.remove_warning(user.id)
                     return 
                     
