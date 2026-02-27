@@ -620,14 +620,16 @@ async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🔨 **Current Action:** {action.upper()}"
     )
 
-    # 3. Create the inline buttons
+    # 3. Create the inline buttons (Warn upar, Mute+Ban middle mein, Delete niche)
     keyboard = [
-        [
-            InlineKeyboardButton("⚠️ Warn", callback_data="cfg_warn")\n,
-            InlineKeyboardButton("🔇 Mute", callback_data="cfg_mute"),
-            InlineKeyboardButton("🚫 Ban", callback_data="cfg_ban")\n,
-            InlineKeyboardButton("🗑 Delete", callback_data="del_msg")
-        ]
+        # --- Pehli Line (Top) ---
+        [InlineKeyboardButton("⚠️ Warn", callback_data="cfg_warn")],
+        
+        # --- Doosri Line (Middle) ---
+        [InlineKeyboardButton("🔇 Mute", callback_data="cfg_mute"), InlineKeyboardButton("🚫 Ban", callback_data="cfg_ban")],
+        
+        # --- Teesri Line (Bottom) ---
+        [InlineKeyboardButton("🗑 Delete", callback_data="del_msg")]
     ]
 
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
