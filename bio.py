@@ -197,20 +197,17 @@ async def global_bot_admin_check(update: Update, context: ContextTypes.DEFAULT_T
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     
-    # ✅ Sabhi "Delete" buttons (del_msg ya del_123) ke liye common logic
     if "del" in query.data:
         try:
             await query.message.delete()
-            await query.answer() # Button click hone par loading circle hatane ke liye
+            await query.answer() 
         except Exception:
             pass
         return
 
-    # 🔓 ALLOW EVERYONE TO USE HELP BUTTONS (Bypassing admin check)
     if query.data not in ["help_combined", "dm_back"]:
-        # 🔒 GLOBAL ADMIN CHECK FOR OTHER BUTTONS
         if not await is_user_admin(update, context):
-            await query.answer("❌ you are not administrator", show_alert=True)
+            await query.answer("❌ You are not an administrator", show_alert=True)
             return
 
     chat_id = query.message.chat.id
@@ -219,33 +216,53 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data.startswith("cfg_") or query.data.startswith("setwarn_"):
         warn_limit, action = db.get_config(chat_id)
 
-        # 1. Handle Warn Limit Selection
+        # 1. Handle Warn Limit Selection (INSTANT UPDATE)
         if query.data.startswith("setwarn_"):
             limit = int(query.data.split("_")[1])
-            
-            # If they click the number that is already active, just answer and stop
             if limit == warn_limit:
                 await query.answer("✅ Already selected!")
                 return 
                 
             db.set_warn_limit(chat_id, limit)
-            warn_limit = limit  # Update locally for instant display
+            warn_limit = limit 
+            
+            # Rebuild keyboard instantly with the new tick
+            def get_btn(num):
+                btn_text = f"✅ {num}" if num == warn_limit else str(num)
+                return InlineKeyboardButton(btn_text, callback_data=f"setwarn_{num}")
+                
+            keyboard = [
+                [get_btn(3), get_btn(4), get_btn(5), get_btn(6)],
+                [get_btn(7), get_btn(8), get_btn(9), get_btn(10)],
+                [InlineKeyboardButton("⬅️ Back", callback_data="cfg_main")]
+            ]
+            await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
             await query.answer(f"✅ Warn limit set to {limit}")
-            query.data = "cfg_warn"  # Stay on the warn menu so the tick updates instantly
+            return
 
-        # 2. Handle Action (Mute/Ban) Selection
+        # 2. Handle Action (Mute/Ban) Selection (INSTANT UPDATE)
         if query.data in ["cfg_mute", "cfg_ban"]:
             new_action = query.data.split("_")[1]
-            
-            # If they click the action that is already active, just answer and stop
             if new_action == action:
                 await query.answer("✅ Already selected!")
                 return 
                 
             db.set_action(chat_id, new_action)
-            action = new_action  # Update locally for instant display
+            action = new_action 
+            
+            # Rebuild main menu text & keyboard instantly
+            mute_btn = "✅ 🔇 Mute" if action == "mute" else "🔇 Mute"
+            ban_btn = "✅ 🚫 Ban" if action == "ban" else "🚫 Ban"
+            
+            text = f"⚙️ **Group Configuration**\n\n⚠️ **Current Warn Limit:** {warn_limit}\n🔨 **Current Action:** {action.upper()}"
+            keyboard = [
+                [InlineKeyboardButton(f"⚠️ Warn ({warn_limit})", callback_data="cfg_warn")],
+                [InlineKeyboardButton(mute_btn, callback_data="cfg_mute"), InlineKeyboardButton(ban_btn, callback_data="cfg_ban")],
+                [InlineKeyboardButton("🗑 Delete", callback_data="del_msg")]
+            ]
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
             await query.answer(f"✅ Action set to {new_action.upper()}")
-            query.data = "cfg_main"
+            return
 
         # 3. Render Warn Menu
         if query.data == "cfg_warn":
@@ -258,10 +275,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [get_btn(7), get_btn(8), get_btn(9), get_btn(10)],
                 [InlineKeyboardButton("⬅️ Back", callback_data="cfg_main")]
             ]
-            try:
-                await query.edit_message_text("⚠️ **Select Warning Limit:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-            except Exception:
-                pass
+            await query.edit_message_text("⚠️ **Select Warning Limit:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            await query.answer()
             return
 
         # 4. Render Main Menu
@@ -275,16 +290,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton(mute_btn, callback_data="cfg_mute"), InlineKeyboardButton(ban_btn, callback_data="cfg_ban")],
                 [InlineKeyboardButton("🗑 Delete", callback_data="del_msg")]
             ]
-            try:
-                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-            except Exception:
-                pass
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            await query.answer()
             return
-            
-            
-    # ... baki ka code ...
 
-    # Shared Help List
+    # --- HELP AND START MENUS ---
     help_text = (
         "❓ <b>Bot Help Menu</b>\n\n"
         "👤 <b>User Commands:</b>\n"
@@ -294,38 +304,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🛠 <b>Admin Commands:</b>\n"
         "• <code>/allow</code> | <code>/unallow</code> : Whitelist management\n"
         "• <code>/aplist</code> : View whitelisted users\n"
-        "• <code>/config &lt;warn&gt; &lt;hours&gt;</code> : Configure limits\n"
+        "• <code>/config</code> : Configure limits\n"
     )
 
     if query.data == "help_combined":
-        # Agar button group me click hua hai
         if query.message.chat.type != 'private':
             bot_user = await context.bot.get_me()
-            # Bot ke DM me le jaane wala link (sath me 'help' parameter)
             dm_url = f"https://t.me/{bot_user.username}?start=help"
-            
             keyboard = [[InlineKeyboardButton("📥 Get Help in DM", url=dm_url)]]
-            
-            # Group me reply bhejna
-            msg = await query.message.reply_text(
+            await query.message.reply_text(
                 f"Hi {query.from_user.first_name}, please click the button below to see the help menu in your DMs!",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
-            
-            # Loading circle hatane ke liye
             await query.answer() 
             return
-        
-        # Agar button already DM me click hua hai, toh wahi Help menu dikha do
         else:
             keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data="dm_back")]]
             await query.edit_message_text(help_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+            await query.answer()
             return
 
     if query.data == "dm_back":
-        # Fetch the bot user info so it's defined in this scope
         bot_user = await context.bot.get_me()
-        
         start_text = (
             f"    <b>Welcome to {html.escape(bot_user.first_name)}!</b>\n\n"
             "I help to protect your groups from users with links in their Bio.\n\n"
@@ -336,22 +336,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "  •  Whitelist management for trusted users.\n\n"
             "💡 <b>Make the bot an Admin in the group with 'Delete Messages' & 'Ban Users' permissions!</b>\n"
         )
-        
-        # "Back" is replaced by "Support" here too
         keyboard = [
             [InlineKeyboardButton("➕ Add to Group", url=f"https://t.me/{bot_user.username}?startgroup=true")],
             [InlineKeyboardButton("Help❓", callback_data="help_combined")],
             [InlineKeyboardButton("🛠 Support", url="https://t.me/+rjE5xZlIK4U3ODA1"), InlineKeyboardButton("🗑 Delete", callback_data="del_msg")]
         ]
         await query.edit_message_text(start_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+        await query.answer()
         return
 
-    if query.data == "del_msg":
-        try: await query.message.delete()
-        except: pass
-        return
-
-    if "_" in query.data:
+    # --- ACTION BUTTONS (ALLOW/MUTE/BAN) ---
+    if "_" in query.data and not query.data.startswith("cfg_") and not query.data.startswith("setwarn_"):
         parts = query.data.split("_")
         action, target_id = parts[0], int(parts[1])
 
@@ -359,21 +354,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.add_to_allowlist(target_id)
             db.reset_warnings(target_id)
             keyboard = [[InlineKeyboardButton("❌ Unallow", callback_data=f"unallow_{target_id}"), InlineKeyboardButton("🛡 Unwarn", callback_data=f"unwarn_{target_id}")], [InlineKeyboardButton("🗑 Delete", callback_data=f"del_{target_id}")]]
-            await query.edit_message_text(f"✅ User `{target_id}` has been allowd.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            await query.edit_message_text(f"✅ User `{target_id}` has been allowed.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            await query.answer("✅ Added to allowlist!")
+            
         elif action == "unallow":
             db.remove_from_allowlist(target_id)
             keyboard = [[InlineKeyboardButton("✅ allow", callback_data=f"allow_{target_id}"), InlineKeyboardButton("🛡 Unwarn", callback_data=f"unwarn_{target_id}")], [InlineKeyboardButton("🗑 Delete", callback_data=f"del_{target_id}")]]
-            await query.edit_message_text(f"❌ User `{target_id}` Unallowd.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            await query.edit_message_text(f"❌ User `{target_id}` Unallowed.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            await query.answer("❌ Removed from allowlist!")
+            
         elif action == "unwarn":
             new_count = db.remove_warning(target_id)
             await query.edit_message_text(f"🛡 Warning removed. Current: {new_count}")
+            await query.answer("🛡 Warning cleared!")
         
         elif action == "unban":
             try:
-                # unban_chat_member removes the ban. only_if_banned=True prevents errors
                 await context.bot.unban_chat_member(query.message.chat_id, target_id, only_if_banned=True)
                 db.reset_warnings(target_id)
                 await query.edit_message_text(f"🔓 User `{target_id}` has been Unbanned. Warnings restarted!")
+                await query.answer("🔓 User Unbanned!")
             except Exception as e: 
                 await query.answer("❌ Failed to unban. Make sure I am an admin.", show_alert=True)
                 
@@ -384,11 +384,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     target_id, 
                     ChatPermissions(can_send_messages=True, can_send_other_messages=True, can_add_web_page_previews=True, can_invite_users=True)
                 )
-                db.reset_warnings(target_id) # <--- RESETS WARNINGS TO 0
+                db.reset_warnings(target_id)
                 await query.edit_message_text(f"🔊 User `{target_id}` Unmuted. Warnings restarted!")
-            except: pass
-
-       
+                await query.answer("🔊 User Unmuted!")
+            except: 
+                await query.answer("❌ Failed to unmute.", show_alert=True)
 
 # ========== MESSAGE HANDLER ==========
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
