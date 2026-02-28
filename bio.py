@@ -217,12 +217,38 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- CONFIGURATION MENUS LOGIC ---
     if query.data.startswith("cfg_") or query.data.startswith("setwarn_"):
-        
-        # If they clicked "Warn", show numbers 3 to 10
-        if query.data == "cfg_warn":
-            warn_limit, action = db.get_config(chat_id)
+        warn_limit, action = db.get_config(chat_id)
+
+        # 1. Handle Warn Limit Selection
+        if query.data.startswith("setwarn_"):
+            limit = int(query.data.split("_")[1])
             
-            # Helper function to add a tick to the currently active limit
+            # If they click the number that is already active, just answer and stop
+            if limit == warn_limit:
+                await query.answer("✅ Already selected!")
+                return 
+                
+            db.set_warn_limit(chat_id, limit)
+            warn_limit = limit  # Update locally for instant display
+            await query.answer(f"✅ Warn limit set to {limit}")
+            query.data = "cfg_warn"  # Stay on the warn menu so the tick updates instantly
+
+        # 2. Handle Action (Mute/Ban) Selection
+        if query.data in ["cfg_mute", "cfg_ban"]:
+            new_action = query.data.split("_")[1]
+            
+            # If they click the action that is already active, just answer and stop
+            if new_action == action:
+                await query.answer("✅ Already selected!")
+                return 
+                
+            db.set_action(chat_id, new_action)
+            action = new_action  # Update locally for instant display
+            await query.answer(f"✅ Action set to {new_action.upper()}")
+            query.data = "cfg_main"
+
+        # 3. Render Warn Menu
+        if query.data == "cfg_warn":
             def get_btn(num):
                 btn_text = f"✅ {num}" if num == warn_limit else str(num)
                 return InlineKeyboardButton(btn_text, callback_data=f"setwarn_{num}")
@@ -232,32 +258,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [get_btn(7), get_btn(8), get_btn(9), get_btn(10)],
                 [InlineKeyboardButton("⬅️ Back", callback_data="cfg_main")]
             ]
-            await query.edit_message_text("⚠️ **Select Warning Limit:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            try:
+                await query.edit_message_text("⚠️ **Select Warning Limit:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            except Exception:
+                pass
             return
 
-        # If they clicked a number (e.g., setwarn_5)
-        if query.data.startswith("setwarn_"):
-            limit = int(query.data.split("_")[1]) # Extract the number
-            db.set_warn_limit(chat_id, limit)
-            await query.answer(f"✅ Warn limit set to {limit}")
-            query.data = "cfg_main" # Change data to force menu refresh
-
-        # If they clicked Mute or Ban
-        if query.data == "cfg_mute":
-            db.set_action(chat_id, "mute")
-            await query.answer("✅ Action set to MUTE")
-            query.data = "cfg_main"
-
-        if query.data == "cfg_ban":
-            db.set_action(chat_id, "ban")
-            await query.answer("✅ Action set to BAN")
-            query.data = "cfg_main"
-
-        # The Main Config Menu (used for 'Back' or after a setting is changed)
+        # 4. Render Main Menu
         if query.data == "cfg_main":
-            warn_limit, action = db.get_config(chat_id)
-            
-            # Add dynamic ticks based on the active action
             mute_btn = "✅ 🔇 Mute" if action == "mute" else "🔇 Mute"
             ban_btn = "✅ 🚫 Ban" if action == "ban" else "🚫 Ban"
             
@@ -267,8 +275,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton(mute_btn, callback_data="cfg_mute"), InlineKeyboardButton(ban_btn, callback_data="cfg_ban")],
                 [InlineKeyboardButton("🗑 Delete", callback_data="del_msg")]
             ]
-            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            try:
+                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            except Exception:
+                pass
             return
+            
             
     # ... baki ka code ...
 
