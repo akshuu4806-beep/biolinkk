@@ -223,12 +223,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.answer("✅ Already selected!")
                 return 
                 
-            db.set_warn_limit(chat_id, limit)
-            warn_limit = limit 
-            
-            # Rebuild keyboard instantly with the new tick
+            # REBUILD KEYBOARD FIRST for an instant UI update
             def get_btn(num):
-                btn_text = f"✅ {num}" if num == warn_limit else str(num)
+                btn_text = f"✅ {num}" if num == limit else str(num)
                 return InlineKeyboardButton(btn_text, callback_data=f"setwarn_{num}")
                 
             keyboard = [
@@ -236,8 +233,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [get_btn(7), get_btn(8), get_btn(9), get_btn(10)],
                 [InlineKeyboardButton("⬅️ Back", callback_data="cfg_main")]
             ]
+            
+            # UPDATE TELEGRAM UI INSTANTLY
             await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
             await query.answer(f"✅ Warn limit set to {limit}")
+            
+            # SAVE TO DATABASE AFTER UI UPDATE (Prevents lag)
+            db.set_warn_limit(chat_id, limit)
             return
 
         # 2. Handle Action (Mute/Ban) Selection (INSTANT UPDATE)
@@ -247,22 +249,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.answer("✅ Already selected!")
                 return 
                 
-            db.set_action(chat_id, new_action)
-            action = new_action 
+            # REBUILD MAIN MENU TEXT & KEYBOARD FIRST
+            mute_btn = "✅ 🔇 Mute" if new_action == "mute" else "🔇 Mute"
+            ban_btn = "✅ 🚫 Ban" if new_action == "ban" else "🚫 Ban"
             
-            # Rebuild main menu text & keyboard instantly
-            mute_btn = "✅ 🔇 Mute" if action == "mute" else "🔇 Mute"
-            ban_btn = "✅ 🚫 Ban" if action == "ban" else "🚫 Ban"
-            
-            text = f"⚙️ **Group Configuration**\n\n⚠️ **Current Warn Limit:** {warn_limit}\n🔨 **Current Action:** {action.upper()}"
+            text = f"⚙️ **Group Configuration**\n\n⚠️ **Current Warn Limit:** {warn_limit}\n🔨 **Current Action:** {new_action.upper()}"
             keyboard = [
                 [InlineKeyboardButton(f"⚠️ Warn ({warn_limit})", callback_data="cfg_warn")],
                 [InlineKeyboardButton(mute_btn, callback_data="cfg_mute"), InlineKeyboardButton(ban_btn, callback_data="cfg_ban")],
                 [InlineKeyboardButton("🗑 Delete", callback_data="del_msg")]
             ]
+            
+            # UPDATE TELEGRAM UI INSTANTLY
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
             await query.answer(f"✅ Action set to {new_action.upper()}")
+            
+            # SAVE TO DATABASE AFTER UI UPDATE
+            db.set_action(chat_id, new_action)
             return
+            
 
         # 3. Render Warn Menu
         if query.data == "cfg_warn":
