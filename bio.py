@@ -49,9 +49,40 @@ class PersistentDB:
         self.users = self.db["users"]
         self.groups = self.db["groups"]
 
-    def add_user(self, user_id):
-        self.users.update_one({"user_id": user_id}, {"$set": {"user_id": user_id}}, upsert=True)
+    def add_user(self, user):
+        if not user:
+            return
 
+        username = user.username.lower() if user.username else None
+        full_name = user.full_name.strip() if user.full_name else None
+
+        self.users.update_one(
+            {"user_id": user.id},
+            {"$set": {"user_id": user.id, "username": username, "full_name": full_name}},
+            upsert=True
+        )
+
+    def get_user_id_by_username(self, username):
+        if not username:
+            return None
+        clean_username = username.lower().lstrip('@')
+        row = self.users.find_one({"username": clean_username})
+        return row["user_id"] if row else None
+
+    def get_user_id_by_name(self, full_name):
+        if not full_name:
+            return None
+        clean_name = full_name.strip()
+        if not clean_name:
+            return None
+
+        row = self.users.find_one(
+            {"full_name": {"$regex": f"^{re.escape(clean_name)}$", "$options": "i"}},
+            sort=[("_id", -1)]
+        )
+        return row["user_id"] if row else None
+
+    
     def add_group(self, chat_id, title="Unknown Group"):
         self.groups.update_one({"chat_id": chat_id}, {"$set": {"title": title}}, upsert=True)
 
@@ -404,9 +435,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.message.from_user
     chat_id = update.effective_chat.id
+    db.add_user(user)
 
     if update.effective_chat.type == 'private':
-        db.add_user(user.id)
         return
     
     db.add_group(chat_id, update.effective_chat.title)
@@ -536,10 +567,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ------------------------------
    
     bot_user = await context.bot.get_me()
+    db.add_user(update.effective_user)
     
-    if update.effective_chat.type == 'private':
-        db.add_user(update.effective_user.id)
-    else:
+    if update.effective_chat.type != 'private':
         db.add_group(update.effective_chat.id, update.effective_chat.title)
 
     start_text = (
@@ -681,26 +711,43 @@ async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Is block ko 'is_user_admin' ke niche paste karein
 async def resolve_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Ye function User ID, Username (@) aur Reply teeno ko handle karke 
+    Ye function User ID, Username (@ ya plain), Name aur Reply teeno ko handle karke
     numeric ID return karta hai.
     """
     # 1. Agar kisi ke message par reply kiya gaya hai
-    if update.message.reply_to_message:
+    if update.message and update.message.reply_to_message:
         return update.message.reply_to_message.from_user.id
     
     # 2. Agar command ke saath argument diya gaya hai
     if context.args:
         arg = context.args[0]
+        full_arg = " ".join(context.args).strip()
         # Agar numeric ID hai (e.g. 123456)
         if arg.isdigit(): 
             return int(arg)
+            
         # Agar username hai (e.g. @username)
         if arg.startswith('@'):
             try:
                 chat = await context.bot.get_chat(arg)
                 return chat.id
             except Exception:
-                return None
+
+                # Local DB fallback
+                by_username = db.get_user_id_by_username(arg)
+                if by_username:
+                    return by_username
+
+        # Plain username without @
+        if len(context.args) == 1:
+            by_username = db.get_user_id_by_username(arg)
+            if by_username:
+                return by_username
+
+        # Name lookup from local DB (works for users seen by bot)
+        by_name = db.get_user_id_by_name(full_arg)
+        if by_name:
+            return by_name
                 
     return None
 
@@ -716,7 +763,7 @@ async def allow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.reset_warnings(target_id)
         msg = await update.message.reply_text(f"✅ User `{target_id}` whitelisted.")
     else:
-        msg = await update.message.reply_text("❌ Usage: Reply to user or `/allow <ID>`")
+        msg = await update.message.reply_text("❌ Usage: Reply karein ya `/allow <userid | @username | username | name>`")
     asyncio.create_task(delete_after_delay(msg))
 
 async def unallow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
