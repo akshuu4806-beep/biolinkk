@@ -49,40 +49,9 @@ class PersistentDB:
         self.users = self.db["users"]
         self.groups = self.db["groups"]
 
-    def add_user(self, user):
-        if not user:
-            return
+    def add_user(self, user_id):
+        self.users.update_one({"user_id": user_id}, {"$set": {"user_id": user_id}}, upsert=True)
 
-        username = user.username.lower() if user.username else None
-        full_name = user.full_name.strip() if user.full_name else None
-
-        self.users.update_one(
-            {"user_id": user.id},
-            {"$set": {"user_id": user.id, "username": username, "full_name": full_name}},
-            upsert=True
-        )
-
-    def get_user_id_by_username(self, username):
-        if not username:
-            return None
-        clean_username = username.lower().lstrip('@')
-        row = self.users.find_one({"username": clean_username})
-        return row["user_id"] if row else None
-
-    def get_user_id_by_name(self, full_name):
-        if not full_name:
-            return None
-        clean_name = full_name.strip()
-        if not clean_name:
-            return None
-
-        row = self.users.find_one(
-            {"full_name": {"$regex": f"^{re.escape(clean_name)}$", "$options": "i"}},
-            sort=[("_id", -1)]
-        )
-        return row["user_id"] if row else None
-
-    
     def add_group(self, chat_id, title="Unknown Group"):
         self.groups.update_one({"chat_id": chat_id}, {"$set": {"title": title}}, upsert=True)
 
@@ -176,17 +145,6 @@ class PersistentDB:
             return data.get("scanned", 0), data.get("caught", 0)
         return 0, 0
 
-    # Add inside class PersistentDB:
-    def add_clone(self, user_id, bot_token):
-        self.db["clones"].update_one(
-            {"token": bot_token}, 
-            {"$set": {"user_id": user_id, "added_on": datetime.now(IST)}}, 
-            upsert=True
-        )
-
-    def get_all_clones(self):
-        return [doc["token"] for doc in self.db["clones"].find()]
-
 # Initialize with your Mongo URI
 # Tip: Use environment variables instead of hardcoding for security!
 MONGO_URI = os.environ.get('MONGO_URI')
@@ -234,30 +192,7 @@ async def global_bot_admin_check(update: Update, context: ContextTypes.DEFAULT_T
     except Exception:
         # If there's an error (e.g., bot doesn't have access), stay completely silent
         raise ApplicationHandlerStop
-
-async def start_cloned_bot(token):
-    try:
-        app = Application.builder().token(token).build()
         
-        # Add normal handlers here (Do NOT add sudo/owner commands here)
-        app.add_handler(CommandHandler("start", start_command))
-        app.add_handler(CommandHandler("help", help_command))
-        app.add_handler(CommandHandler("status", status_command))
-        app.add_handler(CommandHandler("config", config_command))
-        
-        # Add your message and callback handlers
-        app.add_handler(CallbackQueryHandler(button_handler))
-        app.add_handler(ChatMemberHandler(chat_member_update, ChatMemberHandler.CHAT_MEMBER))
-        app.add_handler(MessageHandler(filters.ALL, message_handler))
-
-        # Start the cloned bot
-        await app.initialize()
-        await app.start()
-        await app.updater.start_polling()
-        logger.info(f"Successfully started cloned bot: {token.split(':')[0]}")
-    except Exception as e:
-        logger.error(f"Failed to start clone bot {token[:10]}... : {e}")
-
 # ========== CALLBACK HANDLER ==========
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -288,9 +223,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.answer("✅ Already selected!")
                 return 
                 
-            # REBUILD KEYBOARD FIRST for an instant UI update
+            db.set_warn_limit(chat_id, limit)
+            warn_limit = limit 
+            
+            # Rebuild keyboard instantly with the new tick
             def get_btn(num):
-                btn_text = f"✅ {num}" if num == limit else str(num)
+                btn_text = f"✅ {num}" if num == warn_limit else str(num)
                 return InlineKeyboardButton(btn_text, callback_data=f"setwarn_{num}")
                 
             keyboard = [
@@ -298,13 +236,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [get_btn(7), get_btn(8), get_btn(9), get_btn(10)],
                 [InlineKeyboardButton("⬅️ Back", callback_data="cfg_main")]
             ]
-            
-            # UPDATE TELEGRAM UI INSTANTLY
             await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
             await query.answer(f"✅ Warn limit set to {limit}")
-            
-            # SAVE TO DATABASE AFTER UI UPDATE (Prevents lag)
-            db.set_warn_limit(chat_id, limit)
             return
 
         # 2. Handle Action (Mute/Ban) Selection (INSTANT UPDATE)
@@ -314,25 +247,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.answer("✅ Already selected!")
                 return 
                 
-            # REBUILD MAIN MENU TEXT & KEYBOARD FIRST
-            mute_btn = "✅ 🔇 Mute" if new_action == "mute" else "🔇 Mute"
-            ban_btn = "✅ 🚫 Ban" if new_action == "ban" else "🚫 Ban"
+            db.set_action(chat_id, new_action)
+            action = new_action 
             
-            text = f"⚙️ **Group Configuration**\n\n⚠️ **Current Warn Limit:** {warn_limit}\n🔨 **Current Action:** {new_action.upper()}"
+            # Rebuild main menu text & keyboard instantly
+            mute_btn = "✅ 🔇 Mute" if action == "mute" else "🔇 Mute"
+            ban_btn = "✅ 🚫 Ban" if action == "ban" else "🚫 Ban"
+            
+            text = f"⚙️ **Group Configuration**\n\n⚠️ **Current Warn Limit:** {warn_limit}\n🔨 **Current Action:** {action.upper()}"
             keyboard = [
                 [InlineKeyboardButton(f"⚠️ Warn ({warn_limit})", callback_data="cfg_warn")],
                 [InlineKeyboardButton(mute_btn, callback_data="cfg_mute"), InlineKeyboardButton(ban_btn, callback_data="cfg_ban")],
                 [InlineKeyboardButton("🗑 Delete", callback_data="del_msg")]
             ]
-            
-            # UPDATE TELEGRAM UI INSTANTLY
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
             await query.answer(f"✅ Action set to {new_action.upper()}")
-            
-            # SAVE TO DATABASE AFTER UI UPDATE
-            db.set_action(chat_id, new_action)
             return
-            
 
         # 3. Render Warn Menu
         if query.data == "cfg_warn":
@@ -469,9 +399,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.message.from_user
     chat_id = update.effective_chat.id
-    db.add_user(user)
 
     if update.effective_chat.type == 'private':
+        db.add_user(user.id)
         return
     
     db.add_group(chat_id, update.effective_chat.title)
@@ -601,9 +531,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ------------------------------
    
     bot_user = await context.bot.get_me()
-    db.add_user(update.effective_user)
     
-    if update.effective_chat.type != 'private':
+    if update.effective_chat.type == 'private':
+        db.add_user(update.effective_user.id)
+    else:
         db.add_group(update.effective_chat.id, update.effective_chat.title)
 
     start_text = (
@@ -664,93 +595,43 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception:
             pass
-
-async def clone_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    # --- STEP 4 START ---
-    if context.bot.token != TOKEN:
-        # Agar ye clone bot hai, to reply mat karo ya error dedo
-        return 
-    # --- STEP 4 END ---
-    
-    if not context.args:
-        await update.message.reply_text("⚠️ Please provide a bot token. \nExample: `/clone 123456789:ABCdefGHIjklMNO`", parse_mode='Markdown')
-        return
-
-    bot_token = context.args[0]
-    
-    # Basic Telegram token validation
-    if not re.match(r'^\d+:[A-Za-z0-9_-]+$', bot_token):
-        await update.message.reply_text("❌ Invalid bot token format!")
-        return
-
-    user_id = update.effective_user.id
-    
-    # Save to database
-    db.add_clone(user_id, bot_token)
-    
-    msg = await update.message.reply_text("⏳ Setting up your clone bot... Please wait.")
-    
-    # Start the bot dynamically without blocking the main bot
-    asyncio.create_task(start_cloned_bot(bot_token))
-    
-    await msg.edit_text("✅ **Your bot has been cloned successfully!**\nIt now has the exact same features as me.", parse_mode='Markdown')
-
-async def clonestatus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    # Don't run on clones and only for Admins
-    if context.bot.token != TOKEN or update.effective_user.id not in ADMIN_IDS:
-        return
-    
-    # SECURITY CHECK: Only allow bot owner(s) to use this
-    if update.effective_user.id not in ADMIN_IDS:
-        return # Ignore silently if a regular user or clone user tries it
-
-    # Fetch the clones from the database
-    clones = db.get_all_clones()
-    clone_count = len(clones)
-
-    # Format and send the stats
-    status_text = (
-        "🤖 **Clone Bot Status**\n\n"
-        f"📊 **Total Active Clones:** `{clone_count}`\n\n"
-        "⚠️ *Tip: Keep an eye on your hosting server's RAM. If this number gets too high, your server might restart automatically.*"
-    )
-    
-    await update.message.reply_text(status_text, parse_mode='Markdown')
-
+        
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 1. Get current bot info
     bot_user = await context.bot.get_me()
     bot_name = html.escape(bot_user.first_name)
 
-    # 2. Uptime calculation
+    # 2. Uptime calculation (Hours, Minutes, Seconds only)
     bot_start_time = db.get_start_time()
     now = datetime.now(IST)
     uptime_delta = now - bot_start_time
     
+    # Calculate total seconds to ensure days are converted into hours
     total_seconds = int(uptime_delta.total_seconds())
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
+    
+    # Format: 25h 15m 30s
     uptime_str = f"{hours}h {minutes}m {seconds}s"
 
     # 3. Get database stats
     total_scanned, bio_caught = db.get_system_counters()
-    allowed_count, total_warnings = db.get_stats()
+    allowd_count, total_warnings = db.get_stats()
     all_groups = db.get_groups()
     active_groups_count = len(all_groups)
 
     # 4. Final text
     status_text = (
-        f"📊 <b>{bot_name} System Stats</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"⏱ <b>Uptime:</b> <code>{uptime_str}</code>\n"
-        f"🔍 <b>Total Scanned:</b> <code>{total_scanned}</code>\n"
-        f"🧬 <b>Bio Links Caught:</b> <code>{bio_caught}</code>\n"
-        f"⚠️ <b>Total Warnings:</b> <code>{total_warnings}</code>\n"
-        f"✅ <b>Allowed Users:</b> <code>{allowed_count}</code>\n"
-        f"📂 <b>Monitored Groups:</b> <code>{active_groups_count}</code>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{bot_name}\n\n"
+        "<b> 📊SYSTEM STATS</b>\n" 
+        "----------------------------\n"
+        "-------------\n"
+        f"<b>⏱ Uptime:</b> <code>{uptime_str}</code>\n"
+        f"<b>🔍 Total Scanned:</b> <code>{total_scanned}</code>\n"
+        f"<b>🧬 Bio Links Caught:</b> <code>{bio_caught}</code>\n"
+        f"<b>⚠️ Total Warnings:</b> <code>{total_warnings}</code>\n"
+        f"<b>✅ allowd Users:</b> <code>{allowd_count}</code>\n"
+        f"<b>📂 Monitored Groups:</b> <code>{active_groups_count}</code>\n"
     )
 
     keyboard = [[InlineKeyboardButton("🗑 Delete", callback_data="del_msg")]]
@@ -760,7 +641,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard), 
         parse_mode='HTML'
     )
-    
+
 async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 1. Admin Check
     if not await is_user_admin(update, context):
@@ -795,43 +676,26 @@ async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Is block ko 'is_user_admin' ke niche paste karein
 async def resolve_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Ye function User ID, Username (@ ya plain), Name aur Reply teeno ko handle karke
+    Ye function User ID, Username (@) aur Reply teeno ko handle karke 
     numeric ID return karta hai.
     """
     # 1. Agar kisi ke message par reply kiya gaya hai
-    if update.message and update.message.reply_to_message:
+    if update.message.reply_to_message:
         return update.message.reply_to_message.from_user.id
     
     # 2. Agar command ke saath argument diya gaya hai
     if context.args:
         arg = context.args[0]
-        full_arg = " ".join(context.args).strip()
         # Agar numeric ID hai (e.g. 123456)
         if arg.isdigit(): 
             return int(arg)
-            
         # Agar username hai (e.g. @username)
         if arg.startswith('@'):
             try:
                 chat = await context.bot.get_chat(arg)
                 return chat.id
             except Exception:
-
-                # Local DB fallback
-                by_username = db.get_user_id_by_username(arg)
-                if by_username:
-                    return by_username
-
-        # Plain username without @
-        if len(context.args) == 1:
-            by_username = db.get_user_id_by_username(arg)
-            if by_username:
-                return by_username
-
-        # Name lookup from local DB (works for users seen by bot)
-        by_name = db.get_user_id_by_name(full_arg)
-        if by_name:
-            return by_name
+                return None
                 
     return None
 
@@ -847,7 +711,7 @@ async def allow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.reset_warnings(target_id)
         msg = await update.message.reply_text(f"✅ User `{target_id}` whitelisted.")
     else:
-        msg = await update.message.reply_text("❌ Usage: Reply karein ya `/allow <userid | @username | username | name>`")
+        msg = await update.message.reply_text("❌ Usage: Reply to user or `/allow <ID>`")
     asyncio.create_task(delete_after_delay(msg))
 
 async def unallow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -876,14 +740,6 @@ async def aplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     asyncio.create_task(delete_after_delay(msg))
 
 async def grouplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    # SECURITY CHECK: Only allow on the main bot, block clones
-    if context.bot.token != TOKEN or update.effective_user.id not in ADMIN_IDS:
-        return 
-
-    # Your owner logic goes here...
-    await update.message.reply_text("This is a sudo command.")
-    
     # Admin Check
     if update.effective_user.id not in ADMIN_IDS:
         msg = await update.message.reply_text("❌ You are not the bot owner.")
@@ -914,13 +770,6 @@ async def grouplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await status_msg.edit_text(text, parse_mode='Markdown')
 
 async def getlink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    # SECURITY CHECK: Only allow on the main bot, block clones
-    if context.bot.token != TOKEN or update.effective_user.id not in ADMIN_IDS:
-        return 
-
-    # Your owner logic goes here...
-    await update.message.reply_text("This is a sudo command.")
     
     if not await is_user_admin(update, context):
         msg = await update.message.reply_text("❌ you are not bot owner")
@@ -936,13 +785,6 @@ async def getlink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e: await update.message.reply_text(f"❌ Error: {e}")
 
 async def gmsg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    # SECURITY CHECK: Only allow on the main bot, block clones
-    if context.bot.token != TOKEN or update.effective_user.id not in ADMIN_IDS:
-        return 
-
-    # Your owner logic goes here...
-    await update.message.reply_text("This is a sudo command.")
     
     if not await is_user_admin(update, context):
         msg = await update.message.reply_text("❌ you are not bot owner")
@@ -958,13 +800,6 @@ async def gmsg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e: await update.message.reply_text(f"❌ Error: {e}")
 
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    # SECURITY CHECK: Only allow on the main bot, block clones
-    if context.bot.token != TOKEN or update.effective_user.id not in ADMIN_IDS:
-        return 
-
-    # Your owner logic goes here...
-    await update.message.reply_text("This is a sudo command.")
     
     if not await is_user_admin(update, context):
         msg = await update.message.reply_text("❌ you are not bot owner")
@@ -981,23 +816,14 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except: pass
     await update.message.reply_text("📢 Broadcast Done.")
 
-async def main():
-    # 1. Initialize the Application with your main BOT_TOKEN
-    if not TOKEN:
-        logger.error("BOT_TOKEN not found in environment variables!")
-        return
-
-    # Create the 'app' variable here so it is defined for the handlers
+def main():
     app = Application.builder().token(TOKEN).build()
 
-    # 2. Add Global Check Handler (MUST be after 'app' is created)
-    # This runs first to check if the bot is an admin in the group
+    # --- ADD THIS LINE RIGHT HERE ---
     app.add_handler(TypeHandler(Update, global_bot_admin_check), group=-1)
     
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("clone", clone_command))
-    app.add_handler(MessageHandler(filters.ALL, message_handler))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("config", config_command))
     app.add_handler(CommandHandler("allow", allow_command))
@@ -1012,24 +838,11 @@ async def main():
    
     app.add_handler(ChatMemberHandler(chat_member_update, ChatMemberHandler.CHAT_MEMBER))
 
-    # 5. Start the bot
-    logger.info("Bot is starting...")
-    await app.initialize()
-    await app.start()
-    
-    # Optional: Start previously added clones
-    clones = db.get_all_clones()
-    for token in clones:
-        asyncio.create_task(start_cloned_bot(token))
+    print("Bot is running...")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
-    await app.updater.start_polling()
-    await asyncio.Event().wait()
+if __name__ == '__main__':
+    print("Script started...")
+    keep_alive()  # <--- Start the web server FIRST
+    main()
 
-if __name__ == "__main__":
-    # Start the keep_alive server for Render
-    keep_alive()
-    
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
