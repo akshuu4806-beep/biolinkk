@@ -724,37 +724,33 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_user = await context.bot.get_me()
     bot_name = html.escape(bot_user.first_name)
 
-    # 2. Uptime calculation (Hours, Minutes, Seconds only)
+    # 2. Uptime calculation
     bot_start_time = db.get_start_time()
     now = datetime.now(IST)
     uptime_delta = now - bot_start_time
     
-    # Calculate total seconds to ensure days are converted into hours
     total_seconds = int(uptime_delta.total_seconds())
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
-    
-    # Format: 25h 15m 30s
     uptime_str = f"{hours}h {minutes}m {seconds}s"
 
     # 3. Get database stats
     total_scanned, bio_caught = db.get_system_counters()
-    allowd_count, total_warnings = db.get_stats()
+    allowed_count, total_warnings = db.get_stats()
     all_groups = db.get_groups()
     active_groups_count = len(all_groups)
 
     # 4. Final text
     status_text = (
-        f"{bot_name}\n\n"
-        "<b> 📊SYSTEM STATS</b>\n" 
-        "----------------------------\n"
-        "-------------\n"
-        f"<b>⏱ Uptime:</b> <code>{uptime_str}</code>\n"
-        f"<b>🔍 Total Scanned:</b> <code>{total_scanned}</code>\n"
-        f"<b>🧬 Bio Links Caught:</b> <code>{bio_caught}</code>\n"
-        f"<b>⚠️ Total Warnings:</b> <code>{total_warnings}</code>\n"
-        f"<b>✅ allowd Users:</b> <code>{allowd_count}</code>\n"
-        f"<b>📂 Monitored Groups:</b> <code>{active_groups_count}</code>\n"
+        f"📊 <b>{bot_name} System Stats</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"⏱ <b>Uptime:</b> <code>{uptime_str}</code>\n"
+        f"🔍 <b>Total Scanned:</b> <code>{total_scanned}</code>\n"
+        f"🧬 <b>Bio Links Caught:</b> <code>{bio_caught}</code>\n"
+        f"⚠️ <b>Total Warnings:</b> <code>{total_warnings}</code>\n"
+        f"✅ <b>Allowed Users:</b> <code>{allowed_count}</code>\n"
+        f"📂 <b>Monitored Groups:</b> <code>{active_groups_count}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
     )
 
     keyboard = [[InlineKeyboardButton("🗑 Delete", callback_data="del_msg")]]
@@ -764,7 +760,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard), 
         parse_mode='HTML'
     )
-
+    
 async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 1. Admin Check
     if not await is_user_admin(update, context):
@@ -986,9 +982,16 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📢 Broadcast Done.")
 
 async def main():
+    # 1. Initialize the Application with your main BOT_TOKEN
+    if not TOKEN:
+        logger.error("BOT_TOKEN not found in environment variables!")
+        return
+
+    # Create the 'app' variable here so it is defined for the handlers
     app = Application.builder().token(TOKEN).build()
 
-    # --- ADD THIS LINE RIGHT HERE ---
+    # 2. Add Global Check Handler (MUST be after 'app' is created)
+    # This runs first to check if the bot is an admin in the group
     app.add_handler(TypeHandler(Update, global_bot_admin_check), group=-1)
     
     app.add_handler(CommandHandler("start", start_command))
@@ -1009,32 +1012,24 @@ async def main():
    
     app.add_handler(ChatMemberHandler(chat_member_update, ChatMemberHandler.CHAT_MEMBER))
 
-    await main_app.initialize()
-    await main_app.start()
-    await main_app.updater.start_polling()
-    logger.info("Main bot started!")
-
-    # 2. Fetch and start all CLONED bots from the database
-    cloned_tokens = db.get_all_clones()
-    for token in cloned_tokens:
-        await start_cloned_bot(token)
-
-    # 3. Keep the event loop running forever
-    await asyncio.Event().wait()
-
-    # 4. Start the bot
+    # 5. Start the bot
+    logger.info("Bot is starting...")
     await app.initialize()
     await app.start()
-    await app.updater.start_polling()
     
-    # Keep the bot running
+    # Optional: Start previously added clones
+    clones = db.get_all_clones()
+    for token in clones:
+        asyncio.create_task(start_cloned_bot(token))
+
+    await app.updater.start_polling()
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    import asyncio
+    # Start the keep_alive server for Render
+    keep_alive()
+    
     try:
-        # If you are using 'keep_alive' from your previous code
-        # keep_alive() 
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
