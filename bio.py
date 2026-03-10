@@ -986,7 +986,7 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📢 Broadcast Done.")
 
 async def main():
-    main_app = Application.builder().token(TOKEN).build()
+    app = Application.builder().token(TOKEN).build()
 
     # --- ADD THIS LINE RIGHT HERE ---
     app.add_handler(TypeHandler(Update, global_bot_admin_check), group=-1)
@@ -1022,7 +1022,19 @@ async def main():
     # 3. Keep the event loop running forever
     await asyncio.Event().wait()
 
+    # 4. Start the bot
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    
+    # Keep the bot running
+    await asyncio.Event().wait()
+
 if __name__ == "__main__":
-    # If you are using keep_alive() for Render/PythonAnywhere, start it here
-    keep_alive() 
-    asyncio.run(main())
+    import asyncio
+    try:
+        # If you are using 'keep_alive' from your previous code
+        # keep_alive() 
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
