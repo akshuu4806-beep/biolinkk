@@ -176,6 +176,17 @@ class PersistentDB:
             return data.get("scanned", 0), data.get("caught", 0)
         return 0, 0
 
+    # Add inside class PersistentDB:
+    def add_clone(self, user_id, bot_token):
+        self.db["clones"].update_one(
+            {"token": bot_token}, 
+            {"$set": {"user_id": user_id, "added_on": datetime.now(IST)}}, 
+            upsert=True
+        )
+
+    def get_all_clones(self):
+        return [doc["token"] for doc in self.db["clones"].find()]
+
 # Initialize with your Mongo URI
 # Tip: Use environment variables instead of hardcoding for security!
 MONGO_URI = os.environ.get('MONGO_URI')
@@ -223,7 +234,30 @@ async def global_bot_admin_check(update: Update, context: ContextTypes.DEFAULT_T
     except Exception:
         # If there's an error (e.g., bot doesn't have access), stay completely silent
         raise ApplicationHandlerStop
+
+async def start_cloned_bot(token):
+    try:
+        app = Application.builder().token(token).build()
         
+        # Add normal handlers here (Do NOT add sudo/owner commands here)
+        app.add_handler(CommandHandler("start", start_command))
+        app.add_handler(CommandHandler("help", help_command))
+        app.add_handler(CommandHandler("status", status_command))
+        app.add_handler(CommandHandler("config", config_command))
+        
+        # Add your message and callback handlers
+        app.add_handler(CallbackQueryHandler(button_handler))
+        app.add_handler(ChatMemberHandler(chat_member_update, ChatMemberHandler.CHAT_MEMBER))
+        app.add_handler(MessageHandler(filters.ALL, message_handler))
+
+        # Start the cloned bot
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling()
+        logger.info(f"Successfully started cloned bot: {token.split(':')[0]}")
+    except Exception as e:
+        logger.error(f"Failed to start clone bot {token[:10]}... : {e}")
+
 # ========== CALLBACK HANDLER ==========
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -630,7 +664,61 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception:
             pass
-        
+
+async def clone_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    # --- STEP 4 START ---
+    if context.bot.token != TOKEN:
+        # Agar ye clone bot hai, to reply mat karo ya error dedo
+        return 
+    # --- STEP 4 END ---
+    
+    if not context.args:
+        await update.message.reply_text("⚠️ Please provide a bot token. \nExample: `/clone 123456789:ABCdefGHIjklMNO`", parse_mode='Markdown')
+        return
+
+    bot_token = context.args[0]
+    
+    # Basic Telegram token validation
+    if not re.match(r'^\d+:[A-Za-z0-9_-]+$', bot_token):
+        await update.message.reply_text("❌ Invalid bot token format!")
+        return
+
+    user_id = update.effective_user.id
+    
+    # Save to database
+    db.add_clone(user_id, bot_token)
+    
+    msg = await update.message.reply_text("⏳ Setting up your clone bot... Please wait.")
+    
+    # Start the bot dynamically without blocking the main bot
+    asyncio.create_task(start_cloned_bot(bot_token))
+    
+    await msg.edit_text("✅ **Your bot has been cloned successfully!**\nIt now has the exact same features as me.", parse_mode='Markdown')
+
+async def clonestatus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    # Don't run on clones and only for Admins
+    if context.bot.token != TOKEN or update.effective_user.id not in ADMIN_IDS:
+        return
+    
+    # SECURITY CHECK: Only allow bot owner(s) to use this
+    if update.effective_user.id not in ADMIN_IDS:
+        return # Ignore silently if a regular user or clone user tries it
+
+    # Fetch the clones from the database
+    clones = db.get_all_clones()
+    clone_count = len(clones)
+
+    # Format and send the stats
+    status_text = (
+        "🤖 **Clone Bot Status**\n\n"
+        f"📊 **Total Active Clones:** `{clone_count}`\n\n"
+        "⚠️ *Tip: Keep an eye on your hosting server's RAM. If this number gets too high, your server might restart automatically.*"
+    )
+    
+    await update.message.reply_text(status_text, parse_mode='Markdown')
+
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 1. Get current bot info
     bot_user = await context.bot.get_me()
@@ -792,6 +880,14 @@ async def aplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     asyncio.create_task(delete_after_delay(msg))
 
 async def grouplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    # SECURITY CHECK: Only allow on the main bot, block clones
+    if context.bot.token != TOKEN or update.effective_user.id not in ADMIN_IDS:
+        return 
+
+    # Your owner logic goes here...
+    await update.message.reply_text("This is a sudo command.")
+    
     # Admin Check
     if update.effective_user.id not in ADMIN_IDS:
         msg = await update.message.reply_text("❌ You are not the bot owner.")
@@ -822,6 +918,13 @@ async def grouplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await status_msg.edit_text(text, parse_mode='Markdown')
 
 async def getlink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    # SECURITY CHECK: Only allow on the main bot, block clones
+    if context.bot.token != TOKEN or update.effective_user.id not in ADMIN_IDS:
+        return 
+
+    # Your owner logic goes here...
+    await update.message.reply_text("This is a sudo command.")
     
     if not await is_user_admin(update, context):
         msg = await update.message.reply_text("❌ you are not bot owner")
@@ -837,6 +940,13 @@ async def getlink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e: await update.message.reply_text(f"❌ Error: {e}")
 
 async def gmsg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    # SECURITY CHECK: Only allow on the main bot, block clones
+    if context.bot.token != TOKEN or update.effective_user.id not in ADMIN_IDS:
+        return 
+
+    # Your owner logic goes here...
+    await update.message.reply_text("This is a sudo command.")
     
     if not await is_user_admin(update, context):
         msg = await update.message.reply_text("❌ you are not bot owner")
@@ -852,6 +962,13 @@ async def gmsg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e: await update.message.reply_text(f"❌ Error: {e}")
 
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    # SECURITY CHECK: Only allow on the main bot, block clones
+    if context.bot.token != TOKEN or update.effective_user.id not in ADMIN_IDS:
+        return 
+
+    # Your owner logic goes here...
+    await update.message.reply_text("This is a sudo command.")
     
     if not await is_user_admin(update, context):
         msg = await update.message.reply_text("❌ you are not bot owner")
@@ -868,14 +985,16 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except: pass
     await update.message.reply_text("📢 Broadcast Done.")
 
-def main():
-    app = Application.builder().token(TOKEN).build()
+async def main():
+    main_app = Application.builder().token(TOKEN).build()
 
     # --- ADD THIS LINE RIGHT HERE ---
     app.add_handler(TypeHandler(Update, global_bot_admin_check), group=-1)
     
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("clone", clone_command))
+    app.add_handler(MessageHandler(filters.ALL, message_handler))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("config", config_command))
     app.add_handler(CommandHandler("allow", allow_command))
@@ -890,10 +1009,20 @@ def main():
    
     app.add_handler(ChatMemberHandler(chat_member_update, ChatMemberHandler.CHAT_MEMBER))
 
-    print("Bot is running...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    await main_app.initialize()
+    await main_app.start()
+    await main_app.updater.start_polling()
+    logger.info("Main bot started!")
 
-if __name__ == '__main__':
-    print("Script started...")
-    keep_alive()  # <--- Start the web server FIRST
-    main()
+    # 2. Fetch and start all CLONED bots from the database
+    cloned_tokens = db.get_all_clones()
+    for token in cloned_tokens:
+        await start_cloned_bot(token)
+
+    # 3. Keep the event loop running forever
+    await asyncio.Event().wait()
+
+if __name__ == "__main__":
+    # If you are using keep_alive() for Render/PythonAnywhere, start it here
+    keep_alive() 
+    asyncio.run(main())
