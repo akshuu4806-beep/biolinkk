@@ -785,19 +785,65 @@ async def getlink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e: await update.message.reply_text(f"❌ Error: {e}")
 
 async def gmsg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    
     if not await is_user_admin(update, context):
-        msg = await update.message.reply_text("❌ you are not bot owner")
+        msg = await update.message.reply_text("❌ You are not an administrator")
         asyncio.create_task(delete_after_delay(msg, 10))
         return
-    
-    if update.effective_user.id not in ADMIN_IDS or len(context.args) < 2: return
+
+    if update.effective_user.id not in ADMIN_IDS:
+        msg = await update.message.reply_text("❌ You are not the bot owner.")
+        asyncio.create_task(delete_after_delay(msg, 10))
+        return
+
+    if not context.args or len(context.args) < 1:
+        msg = await update.message.reply_text(
+            "❌ Usage:\n"
+            "• `/gmsg <group_index> <text>` – send text message\n"
+            "• Reply to any message and type `/gmsg <group_index>` – forward that message"
+        )
+        asyncio.create_task(delete_after_delay(msg, 10))
+        return
+
     try:
         index = int(context.args[0]) - 1
-        groups = db.get_groups()
-        await context.bot.send_message(chat_id=groups[index][0], text=" ".join(context.args[1:]))
-        await update.message.reply_text("✅ Sent.")
-    except Exception as e: await update.message.reply_text(f"❌ Error: {e}")
+    except ValueError:
+        msg = await update.message.reply_text("❌ Invalid group index. Use numeric index from /grouplist.")
+        asyncio.create_task(delete_after_delay(msg, 10))
+        return
+
+    groups = db.get_groups()
+    if index < 0 or index >= len(groups):
+        msg = await update.message.reply_text(f"❌ Group index out of range. Total groups: {len(groups)}")
+        asyncio.create_task(delete_after_delay(msg, 10))
+        return
+
+    target_chat_id = groups[index][0]
+    group_name = groups[index][1]
+
+    # Case 1: User replied to a message
+    if update.message.reply_to_message:
+        try:
+            await context.bot.copy_message(
+                chat_id=target_chat_id,
+                from_chat_id=update.message.chat_id,
+                message_id=update.message.reply_to_message.message_id
+            )
+            await update.message.reply_text(f"✅ Message forwarded to **{group_name}**")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Failed to forward: {e}")
+    else:
+        # Case 2: No reply → send text
+        if len(context.args) < 2:
+            msg = await update.message.reply_text("❌ Please provide a message to send, or reply to a message.")
+            asyncio.create_task(delete_after_delay(msg, 10))
+            return
+        text = " ".join(context.args[1:])
+        try:
+            await context.bot.send_message(chat_id=target_chat_id, text=text)
+            await update.message.reply_text(f"✅ Sent to **{group_name}**")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {e}")
+            
 
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
