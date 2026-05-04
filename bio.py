@@ -433,6 +433,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         u_chat = await context.bot.get_chat(user.id)
         if u_chat.bio and has_link(u_chat.bio): violation, reason = True, "Link in Bio"
+        else:
+            # Bio clean hai – user ne link hata diya, to uski warnings reset kar do
+            db.reset_warnings(user.id)
     except: pass
     
     if not violation and has_link(msg_text): violation, reason = True, "Link in Message"
