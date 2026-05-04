@@ -339,7 +339,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton("➕ Add to Group", url=f"https://t.me/{bot_user.username}?startgroup=true")],
             [InlineKeyboardButton("Help❓", callback_data="help_combined")],
-            [InlineKeyboardButton("🛠 Support", url="https://t.me/amazing_worldXX"), InlineKeyboardButton("🗑 Delete", callback_data="del_msg")]
+            [InlineKeyboardButton("🛠 Support", url="t.me/amazing_worldXX"), InlineKeyboardButton("🗑 Delete", callback_data="del_msg")]
         ]
         await query.edit_message_text(start_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
         await query.answer()
