@@ -222,15 +222,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if limit == warn_limit:
                 await query.answer("✅ Already selected!")
                 return 
-                
+        
             db.set_warn_limit(chat_id, limit)
-            warn_limit = limit 
-            
-            # Rebuild keyboard instantly with the new tick
+            warn_limit = limit   # local variable update
+    
+            # Naya keyboard with ✅ tick on selected limit
             def get_btn(num):
                 btn_text = f"✅ {num}" if num == warn_limit else str(num)
                 return InlineKeyboardButton(btn_text, callback_data=f"setwarn_{num}")
-                
+    
             keyboard = [
                 [get_btn(3), get_btn(4), get_btn(5), get_btn(6)],
                 [get_btn(7), get_btn(8), get_btn(9), get_btn(10)],
@@ -246,14 +246,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if new_action == action:
                 await query.answer("✅ Already selected!")
                 return 
-                
+        
             db.set_action(chat_id, new_action)
-            action = new_action 
-            
-            # Rebuild main menu text & keyboard instantly
+            action = new_action   # local update
+    
+            # Main menu rebuild with ticks
             mute_btn = "✅ 🔇 Mute" if action == "mute" else "🔇 Mute"
             ban_btn = "✅ 🚫 Ban" if action == "ban" else "🚫 Ban"
-            
+    
             text = f"⚙️ **Group Configuration**\n\n⚠️ **Current Warn Limit:** {warn_limit}\n🔨 **Current Action:** {action.upper()}"
             keyboard = [
                 [InlineKeyboardButton(f"⚠️ Warn ({warn_limit})", callback_data="cfg_warn")],
@@ -500,7 +500,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     
         # --- WARNING MESSAGE (Below Limit) ---
         else:
-            text = f"⚠️ <b>MESSAGE REMOVED</b>\n👤 <b>User:</b> {safe_name}\n🆔 <b>ID:</b> <code>{user.id}</code>\n📝 <b>Reason:</b> {reason}\n📊 <b>Warnings:</b> {count}/{warn_limit}\n\n🛑 NOTICE: PLEASE REMOVE ANY LINKS FROM YOUR BIO IMMEDIATELY.\n\n📌 REPEATED VIOLATIONS WILL LEAD TO MUTE/BAN."
+            text = f"⚠️ <b>MESSAGE REMOVED</b>\n👤 <b>User:</b> {safe_name}\n🆔 <b>ID:</b> <code>{user.id}</code>\n📝 <b>Reason:</b> {reason}\n📊 <b>Warnings:</b> {count}/{warn_limit}\n\n🛑 NOTICE: PLEASE REMOVE ANY LINKS FROM YOUR BIO/MESSAGES IMMEDIATELY.\n\n📌 REPEATED VIOLATIONS WILL LEAD TO MUTE/BAN."
             btn_text, btn_data = ("❌ Unallow", f"unallow_{user.id}") if is_allowd else ("✅ allow", f"allow_{user.id}")
             keyboard = [[InlineKeyboardButton(btn_text, callback_data=btn_data), InlineKeyboardButton("🛡 Unwarn", callback_data=f"unwarn_{user.id}")], [InlineKeyboardButton("🗑 Delete", callback_data=f"del_{user.id}")]]
             
