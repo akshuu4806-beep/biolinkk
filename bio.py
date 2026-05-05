@@ -145,6 +145,10 @@ class PersistentDB:
             return data.get("scanned", 0), data.get("caught", 0)
         return 0, 0
 
+    def clear_allowlist(self):
+        """Delete all entries from the allowlist collection."""
+        self.allowlist.delete_many({})
+
 # Initialize with your Mongo URI
 # Tip: Use environment variables instead of hardcoding for security!
 MONGO_URI = os.environ.get('MONGO_URI')
@@ -739,7 +743,48 @@ async def aplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text(msg_text, parse_mode='HTML')
     asyncio.create_task(delete_after_delay(msg))
 
-async def grouplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def clearaplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Remove ALL allowed users from the whitelist (global).
+    Admin only.
+    """
+    # 1. Admin check
+    if not await is_user_admin(update, context):
+        msg = await update.message.reply_text("❌ You are not an administrator!")
+        asyncio.create_task(delete_after_delay(msg, 10))
+        return
+
+    # 2. Get current allowed users
+    allowed_users = db.get_allowlist()  # list of user IDs
+    if not allowed_users:
+        msg = await update.message.reply_text("ℹ️ No users are currently allowed.")
+        asyncio.create_task(delete_after_delay(msg, 10))
+        return
+
+    # 3. Build a list of display strings (usernames if available, else ID)
+    removed_names = []
+    for uid in allowed_users:
+        try:
+            user = await context.bot.get_chat(uid)
+            name = user.full_name or f"User {uid}"
+            removed_names.append(f"{name} (`{uid}`)")
+        except Exception:
+            removed_names.append(f"`{uid}`")
+
+    # 4. Delete all allowed users from the database
+    # We add a helper method to PersistentDB (see below)
+    db.clear_allowlist()
+
+    # 5. Reply with the removed list (limit to 50 to avoid flooding)
+    reply_text = "✅ **All allowed users have been removed.**\n\n**Removed users:**\n" + "\n".join(removed_names[:50])
+    if len(removed_names) > 50:
+        reply_text += f"\n... and {len(removed_names)-50} more."
+    await update.message.reply_text(reply_text, parse_mode='Markdown')
+
+    # Optional: delete the command message after some time
+    asyncio.create_task(delete_after_delay(update.message, 15))
+    
+    async def grouplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Admin Check
     if update.effective_user.id not in ADMIN_IDS:
         msg = await update.message.reply_text("❌ You are not the bot owner.")
@@ -875,6 +920,7 @@ def main():
     app.add_handler(CommandHandler("allow", allow_command))
     app.add_handler(CommandHandler("unallow", unallow_command))
     app.add_handler(CommandHandler("aplist", aplist_command))
+    app.add_handler(CommandHandler("clearaplist", clearaplist_command))
     app.add_handler(CommandHandler("grouplist", grouplist_command))
     app.add_handler(CommandHandler("getlink", getlink_command))
     app.add_handler(CommandHandler("gmsg", gmsg_command))
