@@ -425,40 +425,43 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     warn_limit, action = db.get_config(chat_id)
     msg_text = update.message.text or update.message.caption
-    violation = False
-    reason = ""
 
-    # ---------- BIO CHECK with improved error handling ----------
+    # ---------- CHECK BIO LINK ----------
+    bio_has_link = False
     try:
         u_chat = await context.bot.get_chat(user.id)
         if u_chat.bio and has_link(u_chat.bio):
-            violation = True
-            reason = "Link in Bio"
+            bio_has_link = True
             logging.info(f"⚠️ Bio link detected for {user.id}")
-        else:
-            # Bio clean → reset warnings
-            db.reset_warnings(user.id)
-            logging.info(f"✅ Bio clean, warnings reset for {user.id}")
+        # ⚠️ DO NOT RESET WARRNINGS ON CLEAN BIO
     except Exception as e:
-        # Unable to fetch user info -> skip bio check entirely
         logging.warning(f"Could not fetch bio for {user.id}: {e}")
-        # Do nothing - no violation, no reset
 
-    # ---------- MESSAGE LINK CHECK (only if bio didn't cause violation) ----------
-    if not violation and has_link(msg_text):
-        violation = True
-        reason = "Link in Message"
+    # ---------- CHECK MESSAGE LINK ----------
+    message_has_link = has_link(msg_text)
+    if message_has_link:
         logging.info(f"⚠️ Message link detected from {user.id}")
 
+    # Determine if a violation exists
+    violation = bio_has_link or message_has_link
     if not violation:
         return  # No violation, nothing to do
 
-    # ---------- VIOLATION HANDLING ----------
+    # Build the reason text
+    if bio_has_link and message_has_link:
+        reason = "Links in Bio and Message"
+    elif bio_has_link:
+        reason = "Link in Bio"
+    else:
+        reason = "Link in Message"
+
+    # ---------- DELETE OFFENDING MESSAGE ----------
     try:
         await update.message.delete()
     except:
         pass
 
+    # ---------- ADD ONE WARNING (regardless of how many violations in this message) ----------
     count = db.add_warning(user.id)
     safe_name = html.escape(user.full_name)
 
@@ -494,13 +497,14 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 db.remove_warning(user.id)
                 return
     else:
-        # Below limit: only warning message
-        text = f"⚠️ <b>MESSAGE REMOVED</b>\n👤 <b>User:</b> {safe_name}\n🆔 <b>ID:</b> <code>{user.id}</code>\n📝 <b>Reason:</b> {reason}\n📊 <b>Warnings:</b> {count}/{warn_limit}\n\n🛑 NOTICE: PLEASE REMOVE ANY LINKS FROM YOUR BIO/MESSAGES IMMEDIATELY.\n\n📌 REPEATED VIOLATIONS WILL LEAD TO MUTE/BAN."
+        # Below limit: warning message
+        text = f"⚠️ <b>MESSAGE REMOVED</b>\n👤 <b>User:</b> {safe_name}\n🆔 <b>ID:</b> <code>{user.id}</code>\n📝 <b>Reason:</b> {reason}\n📊 <b>Warnings:</b> {count}/{warn_limit}\n\n🛑 NOTICE: PLEASE REMOVE ANY LINKS FROM YOUR BIO AND MESSAGES IMMEDIATELY.\n\n📌 REPEATED VIOLATIONS WILL LEAD TO MUTE/BAN."
         btn_text, btn_data = ("❌ Unallow", f"unallow_{user.id}") if db.is_allowed(user.id) else ("✅ allow", f"allow_{user.id}")
         keyboard = [[InlineKeyboardButton(btn_text, callback_data=btn_data),
                      InlineKeyboardButton("🛡 Unwarn", callback_data=f"unwarn_{user.id}")],
                     [InlineKeyboardButton("🗑 Delete", callback_data=f"del_{user.id}")]]
         await context.bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+        
         
 # ========== CHAT MEMBER HANDLER (Detects Manual Unmutes) ==========
 async def chat_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
