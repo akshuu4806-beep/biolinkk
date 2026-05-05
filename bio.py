@@ -784,7 +784,7 @@ async def clearaplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Optional: delete the command message after some time
     asyncio.create_task(delete_after_delay(update.message, 15))
     
-    async def grouplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def grouplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Admin Check
     if update.effective_user.id not in ADMIN_IDS:
         msg = await update.message.reply_text("❌ You are not the bot owner.")
