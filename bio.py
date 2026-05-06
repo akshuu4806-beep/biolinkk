@@ -453,8 +453,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reason = "Link in Bio"
     else:
         reason = "Link in Message"
-else:
-    return
+    else:
+        return
     
     # Message sirf tab delete karo jab message mein link ho
     if message_has_link:
