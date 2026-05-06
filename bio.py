@@ -436,37 +436,38 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         u_chat = await context.bot.get_chat(user.id)
         if u_chat.bio and has_link(u_chat.bio):
             bio_has_link = True
+            logging.info(f"⚠️ Bio link detected for {user.id}")
+        # ⚠️ DO NOT RESET WARRNINGS ON CLEAN BIO
     except Exception as e:
         logging.warning(f"Could not fetch bio for {user.id}: {e}")
 
     # ---------- CHECK MESSAGE LINK ----------
     message_has_link = has_link(msg_text)
+    if message_has_link:
+        logging.info(f"⚠️ Message link detected from {user.id}")
 
-    # Koi violation nahi = koi action nahi
-    if not bio_has_link and not message_has_link:
-        return  # Bio bhi clean, message bhi clean = kuch mat karo
+    # Determine if a violation exists
+    violation = bio_has_link or message_has_link
+    if not violation:
+        return  # No violation, nothing to do
 
-    # Reason build karo
+    # Build the reason text
     if bio_has_link and message_has_link:
         reason = "Links in Bio and Message"
     elif bio_has_link:
         reason = "Link in Bio"
     else:
         reason = "Link in Message"
-    else:
-        return
-    
-    # Message sirf tab delete karo jab message mein link ho
-    if message_has_link:
-        try:
-            await update.message.delete()
-        except:
-            pass
 
-    # Warning add karo
+    # ---------- DELETE OFFENDING MESSAGE ----------
+    try:
+        await update.message.delete()
+    except:
+        pass
+
+    # ---------- ADD ONE WARNING (regardless of how many violations in this message) ----------
     count = db.add_warning(user.id)
     safe_name = html.escape(user.full_name)
-    
 
     # ---------- PUNISHMENT (if limit reached) ----------
     if count >= warn_limit:
@@ -507,7 +508,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                      InlineKeyboardButton("🛡 Unwarn", callback_data=f"unwarn_{user.id}")],
                     [InlineKeyboardButton("🗑 Delete", callback_data=f"del_{user.id}")]]
         await context.bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
-        
         
 # ========== CHAT MEMBER HANDLER (Detects Manual Unmutes) ==========
 async def chat_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
