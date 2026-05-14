@@ -396,119 +396,121 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ========== MESSAGE HANDLER ==========
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.from_user:
-        return
+    if not update.message or not update.message.from_user: return
 
+    # Ye line har message ko DB mein count karegi
     db.increment_stat("scanned")
+
     user = update.message.from_user
     chat_id = update.effective_chat.id
 
     if update.effective_chat.type == 'private':
         db.add_user(user.id)
         return
-
+    
     db.add_group(chat_id, update.effective_chat.title)
 
-    # 1. Bot admin check
+    # 1. Check if the bot itself is an admin in the group
     try:
         bot_member = await context.bot.get_chat_member(chat_id, context.bot.id)
         if bot_member.status not in ['administrator', 'creator']:
-            return
+            return  # The bot is not an admin, so it stays entirely silent
     except Exception:
-        return
+        return # Cannot fetch bot status, stay silent just in case
 
-    # 2. Admin / Whitelist check
+    # 2. Check if the user is an Admin, Bot Owner, or Whitelisted (Allowed)
     is_group_admin = await is_user_admin(update, context)
-    is_allowed = db.is_allowed(user.id)
-    if is_group_admin or is_allowed:
-        return
+    is_allowd = db.is_allowed(user.id)
+    
+    if is_group_admin or is_allowd:
+        return  # Do nothing. Admins and allowd users are completely safe from warnings.
 
-    # 3. Ignore join/leave messages
+    # ---> YE NAYI LINE ADD KAREIN (Join messages ignore karne ke liye) <---
     if update.message.new_chat_members or update.message.left_chat_member:
         return
-
+    
+    # 3. Proceed with scanning for regular users
     warn_limit, action = db.get_config(chat_id)
     msg_text = update.message.text or update.message.caption
-
-    # ---------- CHECK BIO LINK ----------
-    bio_has_link = False
+    
+    violation, reason = False, ""
     try:
         u_chat = await context.bot.get_chat(user.id)
-        if u_chat.bio and has_link(u_chat.bio):
-            bio_has_link = True
-            logging.info(f"⚠️ Bio link detected for {user.id}")
-        # ⚠️ DO NOT RESET WARRNINGS ON CLEAN BIO
-    except Exception as e:
-        logging.warning(f"Could not fetch bio for {user.id}: {e}")
+        if u_chat.bio and has_link(u_chat.bio): violation, reason = True, "Link in Bio"
+    except: pass
+    
+    if not violation and has_link(msg_text): violation, reason = True, "Link in Message"
 
-    # ---------- CHECK MESSAGE LINK ----------
-    message_has_link = has_link(msg_text)
-    if message_has_link:
-        logging.info(f"⚠️ Message link detected from {user.id}")
+    if violation:
+        # --- YE LINE YAHAN ADD KAREIN ---
+        if reason == "Link in Bio":
+            db.increment_stat("caught") 
+        # -------------------------------
 
-    # Determine if a violation exists
-    violation = bio_has_link or message_has_link
-    if not violation:
-        return  # No violation, nothing to do
-
-    # Build the reason text
-    if bio_has_link and message_has_link:
-        reason = "Links in Bio and Message"
-    elif bio_has_link:
-        reason = "Link in Bio"
-    else:
-        reason = "Link in Message"
-
-    # ---------- DELETE OFFENDING MESSAGE ----------
-    try:
-        await update.message.delete()
-    except:
-        pass
-
-    # ---------- ADD ONE WARNING (regardless of how many violations in this message) ----------
-    count = db.add_warning(user.id)
-    safe_name = html.escape(user.full_name)
-
-    # ---------- PUNISHMENT (if limit reached) ----------
-    if count >= warn_limit:
-        if action == "mute":
-            try:
-                await context.bot.restrict_chat_member(
-                    chat_id=chat_id,
-                    user_id=user.id,
-                    permissions=ChatPermissions(can_send_messages=False)
-                )
-                text = f"🚫 <b>User is muted indefinitely</b>\n👤 <b>Name:</b> {safe_name}\n🆔 <b>ID:</b> <code>{user.id}</code>\n📝 <b>Reason:</b> {reason}"
-                keyboard = [[InlineKeyboardButton("🔊 Unmute", callback_data=f"unmute_{user.id}"),
-                             InlineKeyboardButton("🗑 Delete", callback_data=f"del_{user.id}")]]
-                await context.bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
-            except Exception as e:
-                err_text = f"⚠️ <b>Failed to mute {safe_name}!</b>\n❗ Ensure I have 'Ban Users' permission."
-                msg = await context.bot.send_message(chat_id, err_text, parse_mode='HTML')
-                db.remove_warning(user.id)
-                return
-
-        elif action == "ban":
-            try:
-                await context.bot.ban_chat_member(chat_id=chat_id, user_id=user.id)
-                text = f"🚫 <b>User has been BANNED</b>\n👤 <b>Name:</b> {safe_name}\n🆔 <b>ID:</b> <code>{user.id}</code>\n📝 <b>Reason:</b> {reason}"
-                keyboard = [[InlineKeyboardButton("🔓 Unban", callback_data=f"unban_{user.id}"),
-                             InlineKeyboardButton("🗑 Delete", callback_data=f"del_{user.id}")]]
-                await context.bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
-            except Exception as e:
-                err_text = f"⚠️ <b>Failed to ban {safe_name}!</b>\n❗ Ensure I have 'Ban Users' permission."
-                msg = await context.bot.send_message(chat_id, err_text, parse_mode='HTML')
-                db.remove_warning(user.id)
-                return
-    else:
-        # Below limit: warning message
-        text = f"⚠️ <b>MESSAGE REMOVED</b>\n👤 <b>User:</b> {safe_name}\n🆔 <b>ID:</b> <code>{user.id}</code>\n📝 <b>Reason:</b> {reason}\n📊 <b>Warnings:</b> {count}/{warn_limit}\n\n🛑 NOTICE: PLEASE REMOVE ANY LINKS FROM YOUR BIO AND MESSAGES IMMEDIATELY.\n\n📌 REPEATED VIOLATIONS WILL LEAD TO MUTE/BAN."
-        btn_text, btn_data = ("❌ Unallow", f"unallow_{user.id}") if db.is_allowed(user.id) else ("✅ allow", f"allow_{user.id}")
-        keyboard = [[InlineKeyboardButton(btn_text, callback_data=btn_data),
-                     InlineKeyboardButton("🛡 Unwarn", callback_data=f"unwarn_{user.id}")],
-                    [InlineKeyboardButton("🗑 Delete", callback_data=f"del_{user.id}")]]
-        await context.bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+        try: await update.message.delete()
+        except: pass
+                
+        count = db.add_warning(user.id)
+        safe_name = html.escape(user.full_name) # Safely encodes <, >, &, etc.
         
+        # --- ENFORCE MUTE OR BAN ---
+        if count >= warn_limit:
+            
+            if action == "mute":
+                try:
+                    await context.bot.restrict_chat_member(
+                        chat_id=chat_id, 
+                        user_id=user.id, 
+                        permissions=ChatPermissions(can_send_messages=False)
+                    )
+                    
+                    if count == warn_limit:
+                        # Limit hit hui: Bada message
+                        text = f"🚫 <b>User is muted indefinitely</b>\n👤 <b>Name:</b> {safe_name}\n🆔 <b>ID:</b> <code>{user.id}</code>\n📝 <b>Reason:</b> {reason}"
+                        keyboard = [[InlineKeyboardButton("🔊 Unmute", callback_data=f"unmute_{user.id}")], [InlineKeyboardButton("🗑 Delete", callback_data=f"del_{user.id}")]]
+                        await context.bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+                    else:
+                        # Limit se zyada spam message: Chhota auto-deleting message
+                        text = f"🚫 <b>User {safe_name} is already muted.</b>"
+                        msg = await context.bot.send_message(chat_id, text, parse_mode='HTML')
+                        asyncio.create_task(delete_after_delay(msg, 30)) # 30 sec baad delete
+                        
+                except Exception as e:
+                    err_text = f"⚠️ <b>Failed to mute {safe_name}!</b>\n❗ Ensure I have 'Ban Users' permission."
+                    msg = await context.bot.send_message(chat_id, err_text, parse_mode='HTML')
+                    db.remove_warning(user.id)
+                    return 
+            
+            elif action == "ban":
+                try:
+                    await context.bot.ban_chat_member(chat_id=chat_id, user_id=user.id)
+                    
+                    if count == warn_limit:
+                        # Limit hit hui: Bada message
+                        text = f"🚫 <b>User has been BANNED</b>\n👤 <b>Name:</b> {safe_name}\n🆔 <b>ID:</b> <code>{user.id}</code>\n📝 <b>Reason:</b> {reason}"
+                        keyboard = [[InlineKeyboardButton("🔓 Unban", callback_data=f"unban_{user.id}"), InlineKeyboardButton("🗑 Delete", callback_data=f"del_{user.id}")]]
+                        await context.bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+                    else:
+                        # Limit se zyada spam message: Chhota auto-deleting message
+                        text = f"🚫 <b>User {safe_name} is already banned.</b>"
+                        msg = await context.bot.send_message(chat_id, text, parse_mode='HTML')
+                        asyncio.create_task(delete_after_delay(msg, 30)) # 30 sec baad delete
+                        
+                except Exception as e:
+                    err_text = f"⚠️ <b>Failed to ban {safe_name}!</b>\n❗ Ensure I have 'Ban Users' permission."
+                    msg = await context.bot.send_message(chat_id, err_text, parse_mode='HTML')
+                    db.remove_warning(user.id)
+                    return
+                    
+        # --- WARNING MESSAGE (Below Limit) ---
+        else:
+            text = f"⚠️ <b>MESSAGE REMOVED</b>\n👤 <b>User:</b> {safe_name}\n🆔 <b>ID:</b> <code>{user.id}</code>\n📝 <b>Reason:</b> {reason}\n📊 <b>Warnings:</b> {count}/{warn_limit}\n\n🛑 NOTICE: PLEASE REMOVE ANY LINKS FROM YOUR BIO IMMEDIATELY.\n\n📌 REPEATED VIOLATIONS WILL LEAD TO MUTE/BAN."
+            btn_text, btn_data = ("❌ Unallow", f"unallow_{user.id}") if is_allowd else ("✅ allow", f"allow_{user.id}")
+            keyboard = [[InlineKeyboardButton(btn_text, callback_data=btn_data), InlineKeyboardButton("🛡 Unwarn", callback_data=f"unwarn_{user.id}")], [InlineKeyboardButton("🗑 Delete", callback_data=f"del_{user.id}")]]
+            
+            await context.bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+
+
 # ========== CHAT MEMBER HANDLER (Detects Manual Unmutes) ==========
 async def chat_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.chat_member: 
