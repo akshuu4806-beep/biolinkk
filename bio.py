@@ -309,6 +309,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• <code>/allow</code> | <code>/unallow</code> : Whitelist management\n"
         "• <code>/aplist</code> : View whitelisted users\n"
         "• <code>/config</code> : Configure limits\n"
+        "• <code>/clearaplist</code> : Remove all allowed users\n"
     )
 
     if query.data == "help_combined":
@@ -573,6 +574,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• <code>/allow</code> | <code>/unallow</code> : Whitelist management\n"
         "• <code>/aplist</code> : View whitelisted users\n"
         "• <code>/config &lt;warn&gt; &lt;hours&gt;</code> : Configure limits\n"
+        "• <code>/clearaplist</code> : Remove all allowed users\n"
     )
     
     keyboard = [[InlineKeyboardButton("🗑 Delete", callback_data="del_msg")]]
