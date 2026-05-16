@@ -650,6 +650,11 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.effective_chat.type == 'private':
+        await update.message.reply_text("❌ This command works only in groups.")
+        return
+    
     # 1. Admin Check
     if not await is_user_admin(update, context):
         msg = await update.message.reply_text("❌ you are not administrator")
@@ -707,6 +712,11 @@ async def resolve_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return None
 
 async def allow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    
+    if update.effective_chat.type == 'private':
+        await update.message.reply_text("❌ This command works only in groups.")
+        return
+    
     if not await is_user_admin(update, context):
         msg = await update.message.reply_text("❌ you are not administrator")
         asyncio.create_task(delete_after_delay(msg, 10))
@@ -722,6 +732,11 @@ async def allow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     asyncio.create_task(delete_after_delay(msg))
 
 async def unallow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    
+    if update.effective_chat.type == 'private':
+        await update.message.reply_text("❌ This command works only in groups.")
+        return
+    
     if not await is_user_admin(update, context):
         msg = await update.message.reply_text("❌ you are not administrator")
         asyncio.create_task(delete_after_delay(msg, 10))
@@ -736,6 +751,10 @@ async def unallow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def aplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
+    if update.effective_chat.type == 'private':
+        await update.message.reply_text("❌ This command works only in groups.")
+        return
+    
     if not await is_user_admin(update, context):
         msg = await update.message.reply_text("❌ you are not administrator")
         asyncio.create_task(delete_after_delay(msg, 10))
@@ -747,6 +766,11 @@ async def aplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     asyncio.create_task(delete_after_delay(msg))
 
 async def clearaplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.effective_chat.type == 'private':
+        await update.message.reply_text("❌ This command works only in groups.")
+        return
+    
     """
     Remove ALL allowed users from the whitelist (global).
     Admin only.
